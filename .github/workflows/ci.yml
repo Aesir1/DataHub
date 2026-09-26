@@ -1,0 +1,156 @@
+# NF-5: restore → build (warnings as errors) → unit tests → contract check → integration tests → e2e → images.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  CI: "true"
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: global.json }
+      - uses: oven-sh/setup-bun@v2
+      - name: Restore
+        run: |
+          dotnet restore DataHub.sln
+          dotnet tool restore
+          (cd web && bun install --frozen-lockfile)
+      - name: Build (TreatWarningsAsErrors)
+        run: dotnet build DataHub.sln --no-restore -c Release -p:CI=true
+      - name: Frontend lint + typecheck + build
+        working-directory: web
+        run: |
+          bun run lint
+          bun run typecheck
+          AUTH_SECRET=ci API_URL=http://localhost:5100 bun run build
+
+  unit-tests:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: global.json }
+      - uses: oven-sh/setup-bun@v2
+      - name: Backend unit tests with coverage (no Docker)
+        run: |
+          for t in Domain Application; do
+            dotnet test --project tests/DataHub.$t.Tests -c Release -- --coverage --coverage-output-format cobertura --coverage-output "$PWD/TestResults/$t.cobertura.xml"
+          done
+      - name: Coverage gate (TE-4, 80 % lines for Domain and Application)
+        run: python3 build/coverage-gate.py 0.8 DataHub.Domain,DataHub.Application TestResults/*.cobertura.xml
+      - name: Frontend unit tests with coverage
+        working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          bun run test:coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: coverage, path: "TestResults/\nweb/coverage/" }
+
+  contract-check:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: global.json }
+      - uses: oven-sh/setup-bun@v2
+      - name: GQ-10 export schema + codegen, fail on diff
+        run: |
+          dotnet run --project src/DataHub.Api -- schema export --output web/schema.graphql
+          rm -f web/schema-settings.json
+          (cd web && bun install --frozen-lockfile && bun run codegen && bun run typecheck)
+          git diff --exit-code -- web/schema.graphql web/src/gql
+      - name: GQ-12 breaking changes against main (report only)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          git show origin/${{ github.base_ref }}:web/schema.graphql > /tmp/base.graphql
+          bunx @graphql-inspector/cli diff /tmp/base.graphql web/schema.graphql
+      - name: DB-6 migrations match the model
+        run: |
+          dotnet tool restore
+          dotnet ef migrations has-pending-model-changes --context AppDbContext --project src/DataHub.Infrastructure --startup-project src/DataHub.DbUtils
+          dotnet ef migrations has-pending-model-changes --context AuthDbContext --project src/DataHub.Auth --startup-project src/DataHub.DbUtils
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: NF-3 gitleaks
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect --source /repo --config /repo/.gitleaks.toml --redact -v
+
+  integration-tests:
+    needs: [unit-tests, contract-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: global.json }
+      - name: Testcontainers (PostgreSQL, RabbitMQ, MinIO)
+        run: |
+          for t in Infrastructure Auth DbUtils Api Webhook; do
+            dotnet test --project tests/DataHub.$t.Tests -c Release -- --coverage --coverage-output-format cobertura --coverage-output "$PWD/TestResults/$t.cobertura.xml"
+          done
+      - name: Coverage report (not gated)
+        run: python3 build/coverage-gate.py 0.8 "" TestResults/*.cobertura.xml || true
+
+  e2e:
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: global.json }
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Azure Functions Core Tools
+        run: npm i -g azure-functions-core-tools@4 --unsafe-perm true
+      - name: Playwright browsers
+        working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+      - name: Aspire.Hosting.Testing boots the AppHost; webhook e2e + Playwright (TE-5)
+        run: dotnet test --project tests/DataHub.IntegrationTests
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: playwright-report, path: web/playwright-report/ }
+
+  images:
+    needs: e2e
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { name: api, dockerfile: src/DataHub.Api/Dockerfile, context: . }
+          - { name: dbutils, dockerfile: src/DataHub.DbUtils/Dockerfile, context: . }
+          - { name: webhook, dockerfile: src/DataHub.Webhook/Dockerfile, context: . }
+          - { name: web, dockerfile: web/Dockerfile, context: web }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.name }} (NF-2 amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: datahub-${{ matrix.name }}:${{ github.sha }}
