@@ -1,0 +1,38 @@
+{
+  "name": "DataHub",
+  "logo": "/brand/logo.svg",
+  "favicon": "/brand/favicon.svg",
+  "fonts": {
+    "heading": { "family": "Poppins", "source": "google", "weights": [600, 700] },
+    "body": { "family": "Inter", "source": "google", "weights": [400, 500] }
+  },
+  "palette": {
+    "light": {
+      "primary": "#0F62FE",
+      "onPrimary": "#FFFFFF",
+      "secondary": "#525252",
+      "accent": "#FF832B",
+      "background": "#FFFFFF",
+      "foreground": "#161616",
+      "success": "#198038",
+      "warning": "#8E6A00",
+      "error": "#DA1E28"
+    },
+    "dark": {
+      "primary": "#78A9FF",
+      "onPrimary": "#001141",
+      "secondary": "#C6C6C6",
+      "background": "#161616",
+      "foreground": "#F4F4F4",
+      "success": "#42BE65",
+      "warning": "#F1C21B",
+      "error": "#FF8389"
+    }
+  },
+  "authScreen": {
+    "background": { "type": "image", "src": "/brand/login-bg.svg" },
+    "overlay": { "color": "#000000", "opacity": 0.35 },
+    "cardPosition": "right",
+    "tagline": "Container temperatures from every webhook, in one place."
+  }
+}

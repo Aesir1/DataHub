@@ -1,0 +1,28 @@
+{
+  "name": "Acme Cold Chain",
+  "logo": "/brand/logo.svg",
+  "favicon": "/brand/favicon.svg",
+  "fonts": {
+    "heading": { "family": "Georgia", "source": "system" },
+    "body": { "family": "Georgia", "source": "system" }
+  },
+  "palette": {
+    "light": {
+      "primary": "#8A3FFC",
+      "onPrimary": "#FFFFFF",
+      "secondary": "#4D5358",
+      "accent": "#08BDBA",
+      "background": "#F2F4F8",
+      "foreground": "#121619",
+      "success": "#198038",
+      "warning": "#8E6A00",
+      "error": "#A2191F"
+    }
+  },
+  "authScreen": {
+    "background": { "type": "color", "src": "#08BDBA" },
+    "overlay": { "color": "#FFFFFF", "opacity": 0.1 },
+    "cardPosition": "left",
+    "tagline": "Ship colder, together."
+  }
+}

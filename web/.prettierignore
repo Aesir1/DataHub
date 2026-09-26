@@ -1,0 +1,7 @@
+src/gql/
+.next/
+schema.graphql
+coverage/
+test-results/
+playwright-report/
+e2e/__screenshots__/

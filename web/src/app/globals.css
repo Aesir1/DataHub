@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/* Brand values (--brand-*) come from branding.json via brandingCss() in the root layout.
+   Components use only these tokens; nothing hard-codes a colour (FE-11). */
+@theme inline {
+  --color-background: var(--brand-background);
+  --color-foreground: var(--brand-foreground);
+  --color-primary: var(--brand-primary);
+  --color-on-primary: var(--brand-on-primary);
+  --color-secondary: var(--brand-secondary);
+  --color-accent: var(--brand-accent);
+  --color-success: var(--brand-success);
+  --color-warning: var(--brand-warning);
+  --color-error: var(--brand-error);
+  --color-muted: var(--brand-secondary);
+  --color-surface: color-mix(in srgb, var(--brand-foreground) 6%, var(--brand-background));
+  --color-border: color-mix(in srgb, var(--brand-foreground) 16%, var(--brand-background));
+  --font-heading: var(--brand-font-heading);
+  --font-body: var(--brand-font-body);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+}
