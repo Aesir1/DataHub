@@ -9,3 +9,4 @@ node_modules/
 TestResults/
 web/schema-settings.json
 *.tsbuildinfo
+aspire/DataHub.AppHost/.certs/

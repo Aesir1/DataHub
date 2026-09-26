@@ -18,10 +18,13 @@ browser ──▶ web (Next.js, Auth.js) ──/api/graphql (BFF, bearer)──�
 1. Install Docker, the .NET 10 SDK, [Bun](https://bun.sh), Node.js 22 and Azure Functions Core Tools v4
    (`npm i -g azure-functions-core-tools@4`). `bun` and `func` must be on the PATH your IDE sees
    (for a desktop-launched Rider that is `~/.profile`, e.g. link them into `~/.local/bin`).
-2. `dotnet tool restore && (cd web && bun install)`
-3. `dotnet run --project aspire/DataHub.AppHost` and open the dashboard link it prints.
+2. `dotnet tool restore && (cd web && bun install)` and trust the HTTPS dev certificate once:
+   `dotnet dev-certs https --trust` (on Linux this covers .NET and the Chrome/Firefox NSS stores; curl needs
+   `--cacert ~/.aspnet/dev-certs/trust/*.pem`).
+3. `dotnet run --project aspire/DataHub.AppHost` (launch profile `https`, dashboard https://localhost:17180) and
+   open the dashboard link it prints. The `http` profile still exists for the dashboard only.
 4. In the dashboard start **dbutils-seed** (resets and seeds App, Auth and the Keycloak dev users).
-5. Open http://localhost:3000 and sign in as `user@local.test` / `User123!` (or `admin@local.test` / `Admin123!`
+5. Open https://localhost:3000 and sign in as `user@local.test` / `User123!` (or `admin@local.test` / `Admin123!`
    for the queue admin page). Dev passwords and secrets are AppHost parameters in
    `aspire/DataHub.AppHost/appsettings.json`; override them with user secrets or a git-ignored
    `appsettings.User.json`.
@@ -31,7 +34,7 @@ Send a signed webhook (secret = parameter `webhook-hmac-secret`):
 ```bash
 body='{"containerId":"MSCU1234567","readings":[{"timestamp":"2026-09-25T10:00:00Z","value":41,"unit":"F"}]}'
 ts=$(date +%s); sig=$(printf '%s.%s' "$ts" "$body" | openssl dgst -sha256 -hmac datahub-hmac-dev-secret -hex | awk '{print $NF}')
-curl -i -X POST localhost:7071/api/webhooks/container \
+curl -i --cacert ~/.aspnet/dev-certs/trust/*.pem -X POST https://localhost:7071/api/webhooks/container \
   -H "X-Webhook-Timestamp: $ts" -H "X-Webhook-Signature: sha256=$sig" -H "X-Webhook-Id: demo-1" -d "$body"
 ```
 
@@ -51,9 +54,13 @@ client-credentials token of client `webhook-container` (audience `webhook`).
 | storage (Azurite) | dynamic | Functions host state only |
 | dbutils-migrate | — | `migrate --context All`, runs before the Api |
 | dbutils-seed | — | `reseed`, explicit start (destructive) |
-| api | 5100 | GraphQL at `/graphql`, `/health`, `/alive` |
-| webhook | 7071 | `/api/webhooks/{sender}`, `/api/health`, `/api/alive` |
-| web | 3000 | dashboard command **Regenerate GraphQL types** |
+| api | https 5101, http 5100 | GraphQL at `/graphql`, `/health`, `/alive` |
+| webhook | https 7071 | `/api/webhooks/{sender}`, `/api/health`, `/api/alive` |
+| web | https 3000 | dashboard command **Regenerate GraphQL types** |
+
+HTTPS uses the ASP.NET Core dev certificate. The AppHost exports it on start to the git-ignored
+`aspire/DataHub.AppHost/.certs/` (PFX for Azure Functions Core Tools, PEM for Next.js). Keycloak, MinIO and
+RabbitMQ stay on plain HTTP on localhost.
 
 ## Solution layout
 

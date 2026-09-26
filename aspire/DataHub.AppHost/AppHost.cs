@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Aspire.Hosting.ApplicationModel;
+using DataHub.AppHost;
 using Microsoft.Extensions.Configuration;
 
 var builder = DistributedApplication.CreateBuilder(args);
@@ -17,6 +18,11 @@ var webhookHmacSecret = builder.AddParameter("webhook-hmac-secret", secret: true
 var authSecret = builder.AddParameter("auth-secret", secret: true);
 var seedAdminPassword = builder.AddParameter("seed-admin-password", secret: true);
 var seedUserPassword = builder.AddParameter("seed-user-password", secret: true);
+
+// HTTPS for Api, webhook and web uses the ASP.NET Core dev certificate (trust it once: dotnet dev-certs https --trust).
+var devCert = DevCertificate.Export(
+    Path.Combine(builder.AppHostDirectory, ".certs"),
+    builder.Configuration["Parameters:dev-cert-password"] ?? throw new InvalidOperationException("Parameter dev-cert-password is missing."));
 
 var postgres = builder.AddPostgres("postgres", password: postgresPassword, port: 5432)
     .WithLifetime(ContainerLifetime.Persistent)
@@ -85,7 +91,7 @@ builder.AddProject<Projects.DataHub_DbUtils>("dbutils-seed")
     .WaitFor(appDb)
     .WaitFor(keycloak);
 
-var api = builder.AddProject<Projects.DataHub_Api>("api")
+var api = builder.AddProject<Projects.DataHub_Api>("api", launchProfileName: "https")
     .WithReference(appDb)
     .WithReference(authDb)
     .WithReference(keycloak)
@@ -98,6 +104,8 @@ var api = builder.AddProject<Projects.DataHub_Api>("api")
     .WaitFor(minio);
 
 // Waits for the Api so the queue is declared and bound before the first webhook is published.
+// --useHttps is also in the launch profile (Aspire reads it for the endpoint scheme), but Rider's Aspire plugin
+// starts `func host start` without the profile's arguments, so it is passed here too; func accepts it twice.
 builder.AddAzureFunctionsProject<Projects.DataHub_Webhook>("webhook")
     .WithHostStorage(storage)
     .WithReference(rabbitmq)
@@ -107,6 +115,7 @@ builder.AddAzureFunctionsProject<Projects.DataHub_Webhook>("webhook")
     .WithEnvironment("Webhook__Senders__container__Schemes__1", "bearer")
     .WithEnvironment("Webhook__Senders__container__Secrets__0", webhookHmacSecret)
     .WithEnvironment("Webhook__Senders__container__ClientId", "webhook-container")
+    .WithArgs("--useHttps", "--cert", devCert.PfxPath, "--password", devCert.Password)
     .WithExternalHttpEndpoints()
     .WithHttpHealthCheck("/api/health")
     .WaitFor(storage)
@@ -116,15 +125,20 @@ builder.AddAzureFunctionsProject<Projects.DataHub_Webhook>("webhook")
     .WaitFor(api);
 
 var repoRoot = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", ".."));
+
+// Next.js serves HTTPS with the dev certificate. --experimental-https-ca is required too: without it Next drops
+// NODE_EXTRA_CA_CERTS when it forks its server process, and the BFF could not call the Api over HTTPS.
 builder.AddNextJsApp("web", "../../web")
     .WithBun()
     .WithEndpoint("http", e =>
     {
+        e.UriScheme = "https";
         e.Port = 3000;
         e.IsProxied = false;
     })
-    .WithEnvironment("API_URL", api.GetEndpoint("http"))
-    .WithEnvironment("AUTH_URL", "http://localhost:3000")
+    .WithArgs("--experimental-https", "--experimental-https-key", devCert.KeyPath, "--experimental-https-cert", devCert.PemPath, "--experimental-https-ca", devCert.PemPath)
+    .WithEnvironment("API_URL", api.GetEndpoint("https"))
+    .WithEnvironment("AUTH_URL", "https://localhost:3000")
     .WithEnvironment("AUTH_TRUST_HOST", "true")
     .WithEnvironment("AUTH_SECRET", authSecret)
     .WithEnvironment("AUTH_KEYCLOAK_ID", "web")

@@ -3,7 +3,7 @@
   "profiles": {
     "DataHub.Webhook": {
       "commandName": "Project",
-      "commandLineArgs": "--port 7071",
+      "commandLineArgs": "--port 7071 --useHttps",
       "launchBrowser": false
     }
   }

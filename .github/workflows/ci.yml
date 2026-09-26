@@ -121,6 +121,8 @@ jobs:
         with: { node-version: 22 }
       - name: Azure Functions Core Tools
         run: npm i -g azure-functions-core-tools@4 --unsafe-perm true
+      - name: HTTPS dev certificate (Api, webhook and web run on HTTPS)
+        run: dotnet dev-certs https --trust || true
       - name: Playwright browsers
         working-directory: web
         run: |

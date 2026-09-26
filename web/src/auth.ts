@@ -27,7 +27,7 @@ export async function federatedSignOut() {
   const session = await auth();
   await signOut({ redirect: false });
   const url = new URL(`${process.env.AUTH_KEYCLOAK_ISSUER}/protocol/openid-connect/logout`);
-  url.searchParams.set("post_logout_redirect_uri", `${process.env.AUTH_URL ?? "http://localhost:3000"}/`);
+  url.searchParams.set("post_logout_redirect_uri", `${process.env.AUTH_URL ?? "https://localhost:3000"}/`);
   if (session?.idToken) url.searchParams.set("id_token_hint", session.idToken);
   else url.searchParams.set("client_id", process.env.AUTH_KEYCLOAK_ID ?? "web");
   redirect(url.toString());

@@ -13,8 +13,10 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["list"], ["junit", { outputFile: "test-results/e2e-junit.xml" }]] : "list",
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
-    trace: "retain-on-failure",
     ...devices["Desktop Chrome"],
+    baseURL: process.env.E2E_BASE_URL ?? "https://localhost:3000",
+    trace: "retain-on-failure",
+    // Locally the dev certificate is trusted (dotnet dev-certs https --trust); CI runners have no trusted NSS store.
+    ignoreHTTPSErrors: !!process.env.CI,
   },
 });

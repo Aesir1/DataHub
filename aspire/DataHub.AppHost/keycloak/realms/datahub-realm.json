@@ -15,15 +15,25 @@
   "refreshTokenMaxReuse": 0,
   "roles": {
     "realm": [
-      { "name": "user", "description": "Can read container data" },
-      { "name": "platform-admin", "description": "Platform administrator" }
+      {
+        "name": "user",
+        "description": "Can read container data"
+      },
+      {
+        "name": "platform-admin",
+        "description": "Platform administrator"
+      }
     ]
   },
   "defaultRole": {
     "name": "default-roles-datahub",
     "composite": true,
     "composites": {
-      "realm": ["offline_access", "uma_authorization", "user"]
+      "realm": [
+        "offline_access",
+        "uma_authorization",
+        "user"
+      ]
     }
   },
   "clients": [
@@ -37,11 +47,17 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
-      "redirectUris": ["http://localhost:3000/*"],
-      "webOrigins": ["http://localhost:3000"],
+      "redirectUris": [
+        "https://localhost:3000/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "https://localhost:3000",
+        "http://localhost:3000"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:3000/*"
+        "post.logout.redirect.uris": "https://localhost:3000/*##http://localhost:3000/*"
       },
       "protocolMappers": [
         {

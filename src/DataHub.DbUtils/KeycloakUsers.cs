@@ -52,6 +52,7 @@ internal sealed class KeycloakUsers(HttpClient http, SeedOptions options, ILogge
 
         await EnsureRealmThemeAsync(ct);
         await EnsureDefaultRoleAsync(Roles.User, ct);
+        await EnsureWebClientUrlsAsync(ct);
         var created = 0;
         created += await EnsureUserAsync("admin@local.test", options.AdminPassword, [Roles.User, Roles.PlatformAdmin], ct) ? 1 : 0;
         created += await EnsureUserAsync("user@local.test", options.UserPassword, [Roles.User], ct) ? 1 : 0;
@@ -75,6 +76,34 @@ internal sealed class KeycloakUsers(HttpClient http, SeedOptions options, ILogge
         using var add = await http.PostAsJsonAsync(composite, new JsonArray(representation), ct);
         add.EnsureSuccessStatusCode();
         logger.LogInformation("Added {Role} to default-roles-{Realm}", role, Realm);
+    }
+
+    /// <summary>The realm import only runs once; bring an existing <c>web</c> client up to the HTTPS URLs.</summary>
+    private async Task EnsureWebClientUrlsAsync(CancellationToken ct)
+    {
+        var clients = await http.GetFromJsonAsync<JsonArray>($"admin/realms/{Realm}/clients?clientId=web", ct) ?? [];
+        if (clients.FirstOrDefault() is not JsonObject client)
+        {
+            return;
+        }
+
+        string[] redirects = ["https://localhost:3000/*", "http://localhost:3000/*"];
+        string[] origins = ["https://localhost:3000", "http://localhost:3000"];
+        const string postLogout = "https://localhost:3000/*##http://localhost:3000/*";
+        var current = client["redirectUris"]?.AsArray().Select(u => u!.GetValue<string>()).ToHashSet() ?? [];
+        var attributes = client["attributes"] as JsonObject ?? [];
+        if (redirects.All(current.Contains) && attributes["post.logout.redirect.uris"]?.GetValue<string>() == postLogout)
+        {
+            return;
+        }
+
+        client["redirectUris"] = new JsonArray([.. redirects.Select(u => JsonValue.Create(u))]);
+        client["webOrigins"] = new JsonArray([.. origins.Select(u => JsonValue.Create(u))]);
+        attributes["post.logout.redirect.uris"] = postLogout;
+        client["attributes"] = attributes;
+        using var update = await http.PutAsJsonAsync($"admin/realms/{Realm}/clients/{client["id"]!.GetValue<string>()}", client, ct);
+        update.EnsureSuccessStatusCode();
+        logger.LogInformation("Updated web client redirect URIs for HTTPS");
     }
 
     /// <summary>AU-5: the branded login theme (keycloak/themes/datahub, generated from web/config/branding.json).</summary>

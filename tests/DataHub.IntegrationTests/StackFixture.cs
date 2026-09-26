@@ -34,6 +34,7 @@ public sealed class StackFixture : IAsyncLifetime
         var seed = App.Services.GetRequiredService<DistributedApplicationModel>().Resources.Single(r => r.Name == "dbutils-seed");
         var started = await commands.ExecuteCommandAsync(seed, "resource-start", ct);
         started.Success.ShouldBeTrue(started.Message);
+
         // Wait for this run to start (StartTimeStamp set) before waiting for it to end, so a stale snapshot
         // cannot release the tests while the seed is still dropping databases.
         var seeded = await notifications.WaitForResourceAsync(
