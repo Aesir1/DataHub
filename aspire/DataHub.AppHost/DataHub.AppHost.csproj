@@ -1,0 +1,22 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.5.4">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>datahub-apphost</UserSecretsId>
+    <!-- AddNextJsApp and WithoutHttpsCertificate are experimental; the Aspire CLI bundle is not required for dotnet run. -->
+    <NoWarn>$(NoWarn);ASPIREJAVASCRIPT001;ASPIRECERTIFICATES001;ASPIRE010</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="Aspire.Hosting.Keycloak" />
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" />
+    <PackageReference Include="Aspire.Hosting.JavaScript" />
+    <PackageReference Include="Aspire.Hosting.Azure.Storage" />
+    <PackageReference Include="Aspire.Hosting.Azure.Functions" />
+    <PackageReference Include="CommunityToolkit.Aspire.Hosting.Minio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DataHub.Api\DataHub.Api.csproj" />
+    <ProjectReference Include="..\..\src\DataHub.DbUtils\DataHub.DbUtils.csproj" />
+    <ProjectReference Include="..\..\src\DataHub.Webhook\DataHub.Webhook.csproj" />
+  </ItemGroup>
+</Project>
