@@ -1,0 +1,29 @@
+/* Generated from web/config/branding.json by web/scripts/keycloak-theme.ts. Do not edit. */
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500&display=swap");
+:root {
+  --pf-v5-global--primary-color--100: #0F62FE;
+  --pf-v5-global--primary-color--200: #0F62FE;
+  --pf-v5-global--link--Color: #0F62FE;
+  --pf-v5-global--link--Color--hover: #0F62FE;
+  --pf-v5-global--danger-color--100: #DA1E28;
+  --pf-v5-global--success-color--100: #198038;
+  --pf-v5-global--Color--100: #161616;
+  --pf-v5-global--BackgroundColor--100: #FFFFFF;
+  --pf-v5-global--FontFamily--text: "Inter", system-ui, sans-serif;
+  --pf-v5-global--FontFamily--heading: "Poppins", system-ui, sans-serif;
+}
+body, .pf-v5-c-login {
+  background: linear-gradient(#00000059, #00000059), url("../img/background.svg") center / cover no-repeat;
+  font-family: var(--pf-v5-global--FontFamily--text);
+}
+.pf-v5-c-login__main { background-color: #FFFFFF; color: #161616; border-radius: 8px; }
+.pf-v5-c-login__main-header h1, .pf-v5-c-title { font-family: var(--pf-v5-global--FontFamily--heading); }
+.pf-v5-c-button.pf-m-primary { background-color: #0F62FE; color: #FFFFFF; }
+#kc-header-wrapper {
+  font-family: var(--pf-v5-global--FontFamily--heading);
+  color: #fff;
+  font-size: 0;
+  background: url("../img/logo.svg") center top / 56px 56px no-repeat;
+  padding-top: 64px;
+}
+#kc-header-wrapper::after { content: "DataHub"; font-size: 1.75rem; font-weight: 600; }
