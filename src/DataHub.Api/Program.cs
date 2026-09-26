@@ -20,6 +20,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.MapGraphQL().RequireAuthorization();
+app.MapFileEndpoints();
 
 await app.RunWithGraphQLCommandsAsync(args);
 

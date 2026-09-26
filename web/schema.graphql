@@ -51,7 +51,7 @@ type Query {
       requireOneSlicingArgument: false
     )
     @cost(weight: "10")
-  "Own documents (all for platform-admin) with a 5-minute presigned download URL."
+  "Own documents (all for platform-admin) with their download path."
   documents(
     "Returns the first _n_ elements from the list."
     first: Int
@@ -128,7 +128,7 @@ type Query {
 
 "Every non-abstract subclass is registered as an extension of the Mutation type (source-generated registration, see GraphQlSetup)."
 type Mutation {
-  "Creates a Pending document and returns a presigned PUT URL valid 10 minutes (max 25 MB, allow-listed types)."
+  "Creates a Pending document and returns the path to PUT its content to (max 25 MB, allow-listed types)."
   requestDocumentUpload(input: RequestDocumentUploadInput!): RequestDocumentUploadPayload!
     @authorize(policy: "documents.write")
     @cost(weight: "10")
@@ -255,8 +255,8 @@ type Document {
   id: UUID!
   ownerId: UUID!
   status: DocumentStatus!
-  "Presigned GET URL valid 5 minutes; null while the upload is pending."
-  downloadUrl: URL @cost(weight: "10")
+  "Same-origin download path; null while the upload is pending."
+  downloadUrl: String @cost(weight: "10")
   fileName: String!
   contentType: String!
   sizeBytes: Long!
@@ -286,10 +286,10 @@ type DocumentsEdge {
   node: Document!
 }
 
+"UploadUrl is a same-origin path the browser PUTs the file to (the web BFF forwards it to the Api)."
 type DocumentUploadPayload {
   document: Document!
-  uploadUrl: URI!
-  expiresAtUtc: DateTime!
+  uploadUrl: String!
 }
 
 type FieldError {
@@ -785,12 +785,6 @@ scalar Long
 "The `UnsignedInt` scalar type represents an unsigned 32-bit integer."
 scalar UnsignedInt
   @specifiedBy(url: "https://scalars.graphql.org/chillicream/unsigned-int.html")
-
-"The `URI` scalar type represents a Uniform Resource Identifier (URI) as defined by RFC 3986."
-scalar URI @specifiedBy(url: "https://scalars.graphql.org/chillicream/uri.html")
-
-"The `URL` scalar type represents a Uniform Resource Locator (URL) as defined by RFC 3986."
-scalar URL @specifiedBy(url: "https://scalars.graphql.org/chillicream/url.html")
 
 "The `UUID` scalar type represents a Universally Unique Identifier (UUID) as defined by RFC 9562."
 scalar UUID

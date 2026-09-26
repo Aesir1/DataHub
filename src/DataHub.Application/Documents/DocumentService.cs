@@ -4,14 +4,14 @@ using DataHub.Domain.Exceptions;
 
 namespace DataHub.Application.Documents;
 
-public sealed record DocumentUpload(Document Document, Uri UploadUrl, DateTimeOffset ExpiresAtUtc);
+public sealed record DocumentUpload(Document Document, string UploadUrl);
 
-/// <summary>Document metadata lives in PostgreSQL; browsers move the bytes directly through presigned URLs.</summary>
-public sealed class DocumentService(IRepository<Document, Guid> documents, IObjectStorage storage, ICurrentUser user, TimeProvider time)
+/// <summary>
+/// Document metadata lives in PostgreSQL, the bytes in S3. S3 is never reachable from browsers: they upload and
+/// download through the Api's content endpoint (proxied by the web BFF at the same path), which checks ownership.
+/// </summary>
+public sealed class DocumentService(IRepository<Document, Guid> documents, IObjectStorage storage, ICurrentUser user)
 {
-    public static readonly TimeSpan UploadUrlLifetime = TimeSpan.FromMinutes(10);
-    public static readonly TimeSpan DownloadUrlLifetime = TimeSpan.FromMinutes(5);
-
     /// <summary>Documents the caller may see: own ones, or all for platform admins.</summary>
     public IQueryable<Document> Query()
     {
@@ -57,7 +57,7 @@ public sealed class DocumentService(IRepository<Document, Guid> documents, IObje
         return await documents.UpdateAsync(document, ct);
     }
 
-    /// <summary>New presigned PUT on the same key; the document is Pending until confirmed again.</summary>
+    /// <summary>Same key, new content; the document is Pending until confirmed again.</summary>
     public async Task<DocumentUpload> ReplaceContentAsync(Guid id, string contentType, long sizeBytes, CancellationToken ct = default)
     {
         var document = await GetOwnedAsync(id, ct);
@@ -77,10 +77,37 @@ public sealed class DocumentService(IRepository<Document, Guid> documents, IObje
         await storage.DeleteAsync(Document.Bucket, document.ObjectKey, ct);
     }
 
-    public Uri? DownloadUrl(Document document) =>
-        document.Status == DocumentStatus.Available
-            ? storage.GetPresignedUrl(Document.Bucket, document.ObjectKey, HttpVerb.Get, DownloadUrlLifetime)
+    /// <summary>Browser path of the content endpoint (web BFF route, forwarded to the Api with the user's token).</summary>
+    public static string ContentPath(Guid id) => $"/api/documents/{id}/content";
+
+    public static string? DownloadUrl(Document document) =>
+        document.Status == DocumentStatus.Available ? ContentPath(document.Id) : null;
+
+    /// <summary>Stores the bytes of a Pending document; the caller enforces the 25 MB body limit.</summary>
+    public async Task UploadContentAsync(Guid id, Stream content, string contentType, CancellationToken ct = default)
+    {
+        var document = await GetOwnedAsync(id, ct);
+        if (document.Status != DocumentStatus.Pending)
+        {
+            throw new ConflictException("Request an upload (or content replacement) first.");
+        }
+
+        if (!string.Equals(contentType, document.ContentType, StringComparison.OrdinalIgnoreCase))
+        {
+            throw Invalid(nameof(contentType), $"Content type must be {document.ContentType}.");
+        }
+
+        await storage.PutAsync(Document.Bucket, document.ObjectKey, content, document.ContentType, ct);
+    }
+
+    public async Task<(Document Document, StoredObject Content)> OpenContentAsync(Guid id, CancellationToken ct = default)
+    {
+        var document = await GetOwnedAsync(id, ct);
+        var content = document.Status == DocumentStatus.Available
+            ? await storage.GetAsync(Document.Bucket, document.ObjectKey, ct)
             : null;
+        return (document, content ?? throw NotFoundException.For<Document>(id));
+    }
 
     private bool CanSeeAll => user.Roles.Contains("platform-admin");
 
@@ -105,10 +132,7 @@ public sealed class DocumentService(IRepository<Document, Guid> documents, IObje
         }
     }
 
-    private DocumentUpload UploadFor(Document document) => new(
-        document,
-        storage.GetPresignedUrl(Document.Bucket, document.ObjectKey, HttpVerb.Put, UploadUrlLifetime, document.ContentType),
-        time.GetUtcNow() + UploadUrlLifetime);
+    private static DocumentUpload UploadFor(Document document) => new(document, ContentPath(document.Id));
 
     private Guid RequireUser() => user.Id ?? throw new ForbiddenException("Sign in required.");
 

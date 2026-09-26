@@ -27,14 +27,33 @@ public sealed class SeedOptions
     public string? LoginTheme { get; set; }
 }
 
-/// <summary>Creates the local dev users through the Keycloak Admin REST API. Existing users are left untouched.</summary>
+/// <summary>
+/// Keycloak Admin REST API seeding. <see cref="SeedRealmAsync"/> (login theme, default role) is safe for production;
+/// <see cref="SeedAsync"/> adds the local dev users and localhost client URLs. Existing users are left untouched.
+/// </summary>
 internal sealed class KeycloakUsers(HttpClient http, SeedOptions options, ILogger<KeycloakUsers> logger)
 {
     public const string Realm = "datahub";
 
+    /// <summary>Local development: realm settings, localhost URLs of the web client, and the two dev users.</summary>
     public async Task<int> SeedAsync(CancellationToken ct)
     {
         Validator.ValidateObject(options, new ValidationContext(options), validateAllProperties: true);
+        await SeedRealmAsync(ct);
+        await EnsureWebClientUrlsAsync(ct);
+        var created = 0;
+        created += await EnsureUserAsync("admin@local.test", options.AdminPassword, [Roles.User, Roles.PlatformAdmin], ct) ? 1 : 0;
+        created += await EnsureUserAsync("user@local.test", options.UserPassword, [Roles.User], ct) ? 1 : 0;
+        return created;
+    }
+
+    /// <summary>Production-safe: the login theme and the default <c>user</c> role for self-registered accounts.</summary>
+    public async Task<int> SeedRealmAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(options.KeycloakAdminPassword))
+        {
+            throw new ValidationException("Seed:KeycloakAdminPassword is required.");
+        }
 
         using var token = await http.PostAsync(
             "realms/master/protocol/openid-connect/token",
@@ -51,31 +70,27 @@ internal sealed class KeycloakUsers(HttpClient http, SeedOptions options, ILogge
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
         await EnsureRealmThemeAsync(ct);
-        await EnsureDefaultRoleAsync(Roles.User, ct);
-        await EnsureWebClientUrlsAsync(ct);
-        var created = 0;
-        created += await EnsureUserAsync("admin@local.test", options.AdminPassword, [Roles.User, Roles.PlatformAdmin], ct) ? 1 : 0;
-        created += await EnsureUserAsync("user@local.test", options.UserPassword, [Roles.User], ct) ? 1 : 0;
-        return created;
+        return await EnsureDefaultRoleAsync(Roles.User, ct) ? 1 : 0;
     }
 
     /// <summary>
     /// Self-registered users get <paramref name="role"/>: it is added to the realm's default-roles composite
     /// (the realm import's defaultRole block is not applied by Keycloak).
     /// </summary>
-    private async Task EnsureDefaultRoleAsync(string role, CancellationToken ct)
+    private async Task<bool> EnsureDefaultRoleAsync(string role, CancellationToken ct)
     {
         var composite = $"admin/realms/{Realm}/roles/default-roles-{Realm}/composites";
         var current = await http.GetFromJsonAsync<JsonArray>($"{composite}/realm", ct) ?? [];
         if (current.Any(r => r?["name"]?.GetValue<string>() == role))
         {
-            return;
+            return false;
         }
 
         var representation = await http.GetFromJsonAsync<JsonObject>($"admin/realms/{Realm}/roles/{role}", ct);
         using var add = await http.PostAsJsonAsync(composite, new JsonArray(representation), ct);
         add.EnsureSuccessStatusCode();
         logger.LogInformation("Added {Role} to default-roles-{Realm}", role, Realm);
+        return true;
     }
 
     /// <summary>The realm import only runs once; bring an existing <c>web</c> client up to the HTTPS URLs.</summary>

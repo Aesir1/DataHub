@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { login, unique, users } from "./helpers";
 
-test("documents upload, download, rename, replace and delete via presigned URLs", async ({
+test("documents upload, download, rename, replace and delete through the Api", async ({
   page,
   request,
 }) => {
@@ -16,8 +16,11 @@ test("documents upload, download, rename, replace and delete via presigned URLs"
   const row = page.getByRole("row", { name: new RegExp(fileName) });
   await expect(row).toContainText("Available");
 
+  // Same-origin route with the session cookie; without it (no browser session) the route refuses.
   const href = await row.getByRole("link", { name: fileName }).getAttribute("href");
-  expect(await (await request.get(href!)).text()).toBe("hello e2e");
+  expect(href).toMatch(/^\/api\/documents\/[0-9a-f-]+\/content$/);
+  expect(await (await page.request.get(href!)).text()).toBe("hello e2e");
+  expect((await request.get(href!)).status()).toBe(401);
 
   await row.getByRole("button", { name: "Rename" }).click();
   const renamed = `renamed-${fileName}`;
@@ -29,11 +32,11 @@ test("documents upload, download, rename, replace and delete via presigned URLs"
   await renamedRow
     .getByLabel(`Replace ${renamed}`)
     .setInputFiles({ name: renamed, mimeType: "text/plain", buffer: Buffer.from("second version") });
-  // Same object key, new bytes: poll the (re-signed) download link until the replacement is served.
+  // Same object key, new bytes: poll the download link until the replacement is served.
   await expect
     .poll(async () => {
       const href = await renamedRow.getByRole("link", { name: renamed }).getAttribute("href");
-      return href ? (await request.get(href)).text() : null;
+      return href ? (await page.request.get(href)).text() : null;
     })
     .toBe("second version");
 

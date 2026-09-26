@@ -45,6 +45,7 @@ public static class DependencyInjection
                 o.AccessKey = cs.TryGetValue("AccessKey", out var access) ? (string)access : string.Empty;
                 o.SecretKey = cs.TryGetValue("SecretKey", out var secret) ? (string)secret : string.Empty;
             })
+            .Bind(configuration.GetSection("ObjectStorage"))
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddSingleton<IAmazonS3>(sp =>

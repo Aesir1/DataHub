@@ -1,0 +1,188 @@
+# Observability stack for compose.prod.yaml (included from it). Same stack, versions and configuration
+# as the Aspire AppHost runs locally (aspire/DataHub.AppHost/Observability.cs); the configuration files
+# under ./docker are shared by both.
+#
+# Everything sits on the internal `observability` network: no gateway, no NAT, no route off the host.
+# Grafana is the only thing a human talks to, published on 127.0.0.1 through the `tunnel` network
+# (compose.prod.yaml) and reached over SSH:  ssh -L 3300:localhost:3300 <server>
+
+x-limits: &low-priority
+  restart: unless-stopped
+  cpu_shares: 256
+
+services:
+  grafana:
+    <<: *low-priority
+    image: grafana/grafana-oss:13.0.2
+    mem_limit: 224m
+    depends_on: [prometheus, loki, tempo]
+    environment:
+      GOMEMLIMIT: 192MiB
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      # No default on purpose: an unset value fails the `up` rather than shipping admin/admin.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3300}
+      # --- keep Grafana from talking to the Internet ---
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_ANALYTICS_FEEDBACK_LINKS_ENABLED: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_SNAPSHOTS_EXTERNAL_ENABLED: "false"
+      GF_SUPPORT_BUNDLES_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_LOG_LEVEL: warn
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_BIND:-127.0.0.1:3300}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [observability, tunnel]
+
+  prometheus:
+    <<: *low-priority
+    image: prom/prometheus:v3.14.0
+    mem_limit: 192m
+    environment:
+      GOMEMLIMIT: 168MiB
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-2GB}
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+      - --web.listen-address=0.0.0.0:9090
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheusdata:/prometheus
+    networks: [observability]
+
+  loki:
+    <<: *low-priority
+    image: grafana/loki:3.7.7
+    mem_limit: 128m
+    environment:
+      GOMEMLIMIT: 112MiB
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./docker/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - lokidata:/loki
+    networks: [observability]
+
+  tempo:
+    <<: *low-priority
+    image: grafana/tempo:3.0.3
+    mem_limit: 176m
+    environment:
+      GOMEMLIMIT: 152MiB
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./docker/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempodata:/var/tempo
+    networks: [observability]
+
+  # OTLP in (traces, logs, metrics), Docker logs of every other container, health probes.
+  alloy:
+    <<: *low-priority
+    image: grafana/alloy:v1.19.2
+    mem_limit: 224m
+    environment:
+      GOMEMLIMIT: 192MiB
+      PROBE_API: http://api:8080/health
+      PROBE_WEBHOOK: http://webhook:80/api/health
+      PROBE_WEB: http://web:3000/
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --disable-reporting
+    # Reading the Docker socket needs root; nothing here is reachable from off the internal network.
+    user: root
+    volumes:
+      - ./docker/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/host/root:ro
+      - alloydata:/var/lib/alloy/data
+    networks: [observability]
+
+  cadvisor:
+    <<: *low-priority
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    privileged: true
+    cpus: "0.25"
+    mem_limit: 64m
+    environment:
+      GOMEMLIMIT: 56MiB
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=30s
+      - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,process,referenced_memory,resctrl,sched,tcp,udp,disk
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.project,com.docker.compose.service
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /dev/disk/:/dev/disk:ro
+    networks: [observability]
+
+  # Idempotent, runs on every `up`: read-only pg_monitor role + pg_stat_statements in the app database.
+  pg-monitor-init:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PG_EXPORTER_USER: ${PG_EXPORTER_USER:-datahub_metrics}
+      PG_EXPORTER_PASSWORD: ${PG_EXPORTER_PASSWORD:?set PG_EXPORTER_PASSWORD in .env}
+    volumes:
+      - ./docker/postgres-exporter:/scripts:ro
+    entrypoint: ["/bin/sh", "/scripts/provision.sh"]
+    networks: [observability]
+
+  postgres-exporter:
+    <<: *low-priority
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    depends_on:
+      pg-monitor-init:
+        condition: service_completed_successfully
+    environment:
+      DATA_SOURCE_URI: "postgres:5432/app?sslmode=disable"
+      DATA_SOURCE_USER: ${PG_EXPORTER_USER:-datahub_metrics}
+      DATA_SOURCE_PASS: ${PG_EXPORTER_PASSWORD}
+    command:
+      - --collector.stat_statements
+      - --collector.stat_user_tables
+      - --collector.statio_user_tables
+      - --collector.statio_user_indexes
+      - --collector.long_running_transactions
+      - --collector.locks
+    networks: [observability]
+
+volumes:
+  grafanadata:
+  prometheusdata:
+  lokidata:
+  tempodata:
+  alloydata:
+
+networks:
+  observability:
+    internal: true

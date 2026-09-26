@@ -28,6 +28,6 @@ describe("StartScreen", () => {
     const main = screen.getByTestId("start-screen");
     expect(main.style.backgroundColor).toBeTruthy();
     expect(main.querySelector(".justify-start")).toBeTruthy();
-    expect(main.querySelector("img")?.getAttribute("src")).toBe("http://localhost:9000/branding/logo.png");
+    expect(main.querySelector("img")?.getAttribute("src")).toBe("/api/branding/logo.png");
   });
 });

@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text;
 using Amazon.Runtime;
 using Amazon.S3;
@@ -63,13 +62,12 @@ public sealed class StorageTests(PostgresFixture db) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Branding_bucket_is_anonymously_readable_documents_is_not()
+    public async Task Buckets_are_not_anonymously_readable()
     {
         await storage.PutAsync(BucketInitializer.BrandingBucket, "logo.svg", new MemoryStream("<svg/>"u8.ToArray()), "image/svg+xml", Ct);
         await storage.PutAsync(Document.Bucket, "secret", new MemoryStream("x"u8.ToArray()), "text/plain", Ct);
 
-        var anonymous = await http.GetAsync($"{minio.GetConnectionString().TrimEnd('/')}/{BucketInitializer.BrandingBucket}/logo.svg", Ct);
-        anonymous.StatusCode.ShouldBe(HttpStatusCode.OK, await anonymous.Content.ReadAsStringAsync(Ct));
+        (await http.GetAsync($"{minio.GetConnectionString().TrimEnd('/')}/{BucketInitializer.BrandingBucket}/logo.svg", Ct)).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await http.GetAsync($"{minio.GetConnectionString().TrimEnd('/')}/{Document.Bucket}/secret", Ct)).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
@@ -81,29 +79,29 @@ public sealed class StorageTests(PostgresFixture db) : IAsyncLifetime
         owner.Email.Returns("owner@local.test");
         owner.Roles.Returns([]);
         await using var ctx = db.Create(owner);
-        var service = new DocumentService(new Repository<Document, Guid>(ctx), storage, owner, db.Time);
+        var service = new DocumentService(new Repository<Document, Guid>(ctx), storage, owner);
 
-        // Create: Pending row + presigned PUT
+        // Create: Pending row + content path
         var upload = await service.RequestUploadAsync("notes.txt", "text/plain", 11, Ct);
         upload.Document.Status.ShouldBe(DocumentStatus.Pending);
         await Should.ThrowAsync<ConflictException>(() => service.ConfirmUploadAsync(upload.Document.Id, Ct)); // nothing uploaded yet
-        await Put(upload.UploadUrl, "hello world", "text/plain");
+        await Upload(service, upload.Document.Id, "hello world");
 
         // Confirm: HEAD finds it
         var confirmed = await service.ConfirmUploadAsync(upload.Document.Id, Ct);
         confirmed.Status.ShouldBe(DocumentStatus.Available);
 
-        // Read: presigned GET
-        (await http.GetStringAsync(service.DownloadUrl(confirmed)!, Ct)).ShouldBe("hello world");
+        // Read
+        (await Read(service, confirmed.Id)).ShouldBe("hello world");
         (await service.Query().CountAsync(Ct)).ShouldBe(1);
 
         // Update: rename + replace content on the same key
         (await service.RenameAsync(confirmed.Id, "renamed.txt", Ct)).FileName.ShouldBe("renamed.txt");
         var replace = await service.ReplaceContentAsync(confirmed.Id, "text/plain", 3, Ct);
         replace.Document.Status.ShouldBe(DocumentStatus.Pending);
-        await Put(replace.UploadUrl, "new", "text/plain");
+        await Upload(service, confirmed.Id, "new");
         await service.ConfirmUploadAsync(confirmed.Id, Ct);
-        (await http.GetStringAsync(service.DownloadUrl(replace.Document)!, Ct)).ShouldBe("new");
+        (await Read(service, confirmed.Id)).ShouldBe("new");
 
         // Delete: soft-deletes the row and removes the object
         await service.DeleteAsync(confirmed.Id, Ct);
@@ -111,20 +109,18 @@ public sealed class StorageTests(PostgresFixture db) : IAsyncLifetime
         (await storage.HeadAsync(Document.Bucket, confirmed.ObjectKey, Ct)).ShouldBeNull();
     }
 
-    [Fact]
-    public async Task Presigned_put_rejects_a_different_content_type()
+    private static async Task Upload(DocumentService service, Guid id, string body)
     {
-        var url = storage.GetPresignedUrl(Document.Bucket, "owner/typed", DataHub.Application.Abstractions.HttpVerb.Put, TimeSpan.FromMinutes(1), "text/plain");
-
-        using var content = new ByteArrayContent("x"u8.ToArray());
-        content.Headers.ContentType = new MediaTypeHeaderValue("image/png");
-        (await http.PutAsync(url, content, Ct)).IsSuccessStatusCode.ShouldBeFalse();
+        using var content = new MemoryStream(Encoding.UTF8.GetBytes(body));
+        await service.UploadContentAsync(id, content, "text/plain", Ct);
     }
 
-    private async Task Put(Uri url, string body, string contentType)
+    private static async Task<string> Read(DocumentService service, Guid id)
     {
-        using var content = new StringContent(body, Encoding.UTF8);
-        content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
-        (await http.PutAsync(url, content, Ct)).EnsureSuccessStatusCode();
+        var (_, stored) = await service.OpenContentAsync(id, Ct);
+        await using (stored)
+        {
+            return await new StreamReader(stored.Content).ReadToEndAsync(Ct);
+        }
     }
 }

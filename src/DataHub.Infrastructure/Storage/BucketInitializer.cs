@@ -6,13 +6,10 @@ using Microsoft.Extensions.Logging;
 
 namespace DataHub.Infrastructure.Storage;
 
-/// <summary>ST-2: creates the buckets on startup; <c>branding</c> is anonymously readable (login background, logo).</summary>
+/// <summary>ST-2: creates the buckets on startup; both stay private; the Api serves their objects.</summary>
 public sealed class BucketInitializer(IAmazonS3 s3, ILogger<BucketInitializer> logger) : IHostedService
 {
     public const string BrandingBucket = "branding";
-
-    private const string PublicReadPolicy =
-        """{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::branding/*"]}]}""";
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -25,7 +22,8 @@ public sealed class BucketInitializer(IAmazonS3 s3, ILogger<BucketInitializer> l
             }
         }
 
-        await s3.PutBucketPolicyAsync(BrandingBucket, PublicReadPolicy, cancellationToken);
+        // Older versions made branding anonymously readable; drop that policy.
+        await s3.DeleteBucketPolicyAsync(BrandingBucket, cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

@@ -155,7 +155,7 @@ function messageOf(errors: Parameters<typeof formErrors>[0]) {
   return problems ? [problems.message, ...Object.values(problems.fields)].filter(Boolean).join(" ") : null;
 }
 
-/** ST-6: list, upload with progress (straight to object storage via presigned PUT), rename, replace, delete. */
+/** ST-6: list, upload with progress (through the web app to the Api, which writes S3), rename, replace, delete. */
 export function DocumentsPage() {
   const [docs, setDocs] = useState<Doc[] | null>(null);
   const [error, setError] = useState<string | null>(null);

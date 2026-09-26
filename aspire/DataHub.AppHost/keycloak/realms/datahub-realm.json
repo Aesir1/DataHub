@@ -48,16 +48,14 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
-        "https://localhost:3000/*",
-        "http://localhost:3000/*"
+        "${WEB_BASE_URL}/*"
       ],
       "webOrigins": [
-        "https://localhost:3000",
-        "http://localhost:3000"
+        "${WEB_BASE_URL}"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://localhost:3000/*##http://localhost:3000/*"
+        "post.logout.redirect.uris": "${WEB_BASE_URL}/*"
       },
       "protocolMappers": [
         {

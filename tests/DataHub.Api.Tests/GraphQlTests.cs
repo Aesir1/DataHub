@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DataHub.Api.Tests;
 
@@ -146,7 +147,7 @@ public sealed class GraphQlTests(ApiFactory api)
     }
 
     [Fact]
-    public async Task Document_upload_request_returns_presigned_url_and_lists_own_documents_only()
+    public async Task Document_content_goes_through_the_api_and_only_to_its_owner()
     {
         using var owner = api.ClientFor("docs@local.test", "user");
         var upload = (await owner.Gql("""
@@ -154,14 +155,50 @@ public sealed class GraphQlTests(ApiFactory api)
               documentUploadPayload { uploadUrl document { id status downloadUrl } } errors { __typename } } }
             """)).Data()["requestDocumentUpload"]!;
         var payload = upload["documentUploadPayload"]!;
-        payload["uploadUrl"]!.GetValue<string>().ShouldContain("X-Amz-Signature");
+        var id = payload["document"]!["id"]!.GetValue<string>();
+        payload["uploadUrl"]!.GetValue<string>().ShouldBe($"/api/documents/{id}/content");
         payload["document"]!["status"]!.GetValue<string>().ShouldBe("PENDING");
         payload["document"]!["downloadUrl"].Json().ShouldBe("null");
 
+        // The web BFF strips /api and forwards to the Api with the user's token.
+        var content = $"/documents/{id}/content";
         using var other = api.ClientFor("other@local.test", "user");
+        using var anonymous = api.CreateClient();
+        (await anonymous.PutAsync(content, Text("hello"), Ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await other.PutAsync(content, Text("hello"), Ct)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await owner.PutAsync(content, Text("hello", "image/png"), Ct)).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await owner.PutAsync(content, Text("hello"), Ct)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+
+        var confirmed = (await owner.Gql($$"""mutation { confirmDocumentUpload(input: { id: "{{id}}" }) { document { downloadUrl } } }"""))
+            .Data()["confirmDocumentUpload"]!["document"]!;
+        confirmed["downloadUrl"]!.GetValue<string>().ShouldBe($"/api/documents/{id}/content");
+
+        using var download = await owner.GetAsync(content, Ct);
+        (await download.Content.ReadAsStringAsync(Ct)).ShouldBe("hello");
+        download.Content.Headers.ContentType!.MediaType.ShouldBe("text/plain");
+        download.Content.Headers.ContentDisposition!.FileName.ShouldBe("a.txt");
+        (await other.GetAsync(content, Ct)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await anonymous.GetAsync(content, Ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+
         (await other.Gql("{ documents { totalCount } }")).Data()["documents"]!["totalCount"]!.GetValue<int>().ShouldBe(0);
         (await owner.Gql("{ documents { totalCount } }")).Data()["documents"]!["totalCount"]!.GetValue<int>().ShouldBe(1);
     }
+
+    [Fact]
+    public async Task Branding_is_served_anonymously_but_only_from_the_branding_bucket()
+    {
+        var storage = api.Services.GetRequiredService<Application.Abstractions.IObjectStorage>();
+        await storage.PutAsync("branding", "logo.svg", new MemoryStream("<svg/>"u8.ToArray()), "image/svg+xml", Ct);
+        using var anonymous = api.CreateClient();
+
+        using var logo = await anonymous.GetAsync("/branding/logo.svg", Ct);
+        (await logo.Content.ReadAsStringAsync(Ct)).ShouldBe("<svg/>");
+        logo.Content.Headers.ContentType!.MediaType.ShouldBe("image/svg+xml");
+        (await anonymous.GetAsync("/branding/missing.png", Ct)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await anonymous.GetAsync("/branding/../documents/x", Ct)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    private static StringContent Text(string body, string contentType = "text/plain") => new(body, System.Text.Encoding.UTF8, contentType);
 
     [Fact]
     public async Task Temperatures_resolve_their_container_through_a_dataloader()

@@ -49,13 +49,13 @@ export function parseBranding(json: unknown, file = "branding.json"): Branding {
   return result.data;
 }
 
-/** `s3://bucket/key` → public object URL (MinIO `branding` bucket is anonymously readable); anything else unchanged. */
-export function resolveAsset(
-  src: string,
-  minioPublicUrl = process.env.MINIO_PUBLIC_URL ?? "http://localhost:9000",
-): string {
-  const match = /^s3:\/\/([^/]+)\/(.+)$/.exec(src);
-  return match ? `${minioPublicUrl.replace(/\/$/, "")}/${match[1]}/${match[2]}` : src;
+/**
+ * `s3://branding/key` → `/api/branding/key` (served through the web app; S3 is not public). Pass the web
+ * origin when the URL is used outside the app (Keycloak theme). Anything else is returned unchanged.
+ */
+export function resolveAsset(src: string, webOrigin = ""): string {
+  const match = /^s3:\/\/branding\/(.+)$/.exec(src);
+  return match ? `${webOrigin.replace(/\/$/, "")}/api/branding/${match[1]}` : src;
 }
 
 const cssVar: Record<keyof Palette, string> = {

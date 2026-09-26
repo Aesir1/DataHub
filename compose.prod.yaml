@@ -1,0 +1,376 @@
+# Production stack. Every value comes from .env (copy .env.example), which lives on the server only.
+#
+#   docker compose -f compose.prod.yaml build     # local test: build the four images from source
+#   docker compose -f compose.prod.yaml up -d
+#
+# On a server the images are pulled instead (IMAGE_REPO / IMAGE_TAG), exactly like DieWikinger:
+#   IMAGE_TAG=<sha> docker compose -f compose.prod.yaml pull && IMAGE_TAG=<sha> docker compose -f compose.prod.yaml up -d
+#
+# Networks (see the bottom of the file):
+#   ingress        Caddy only. The one network with a route to the Internet (ACME) and published 80/443.
+#   proxy          internal: Caddy <-> the three things it serves (web, keycloak, webhook).
+#   backend        internal: services <-> PostgreSQL, RabbitMQ, MinIO. Nothing here reaches the Internet.
+#                  MinIO lives only here: files go through the api (via web) or the webhook, never directly.
+#   observability  internal: the Grafana stack (compose.observability.yaml) and everything it watches.
+#   tunnel         Grafana and the Keycloak admin console, published on 127.0.0.1 only, no outbound NAT.
+#                  Reach them over SSH:  ssh -L 3300:localhost:3300 -L 8081:localhost:8081 <server>
+name: datahub
+
+include:
+  - compose.observability.yaml
+
+x-otel: &otel
+  # Traces, logs and metrics over OTLP/HTTP to Alloy on the internal observability network.
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: cumulative
+  # 15 s so rate() over Grafana's 60 s $__rate_interval always holds more than one sample.
+  OTEL_METRIC_EXPORT_INTERVAL: "15000"
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${DEPLOYMENT_ENVIRONMENT:-production}
+
+services:
+  # ---------------------------------------------------------------------------------------------
+  # Edge
+  # ---------------------------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      # 80 serves the ACME HTTP challenge and the redirect to HTTPS. Locally (CADDY_TLS=internal) it can move.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in .env}
+      AUTH_DOMAIN: ${AUTH_DOMAIN:?set AUTH_DOMAIN in .env}
+      HOOKS_DOMAIN: ${HOOKS_DOMAIN:?set HOOKS_DOMAIN in .env}
+      CADDY_TLS: ${CADDY_TLS:?set CADDY_TLS in .env (ACME e-mail, or internal)}
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Issued certificates (and, with CADDY_TLS=internal, the local CA). Losing this volume means
+      # re-issuing on every start, which runs into Let's Encrypt rate limits.
+      - caddydata:/data
+      - caddyconfig:/config
+    healthcheck:
+      # With the local CA, web must not start before the root certificate exists (it trusts it at start-up).
+      test: ["CMD-SHELL", "[ \"$$CADDY_TLS\" != internal ] || test -f /data/caddy/pki/authorities/local/root.crt"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      ingress:
+      proxy:
+        # The server-side OIDC calls of web (discovery, token refresh) go to the public Keycloak URL. These
+        # aliases keep that traffic inside the host instead of hairpinning through the public IP.
+        aliases:
+          - ${APP_DOMAIN}
+          - ${AUTH_DOMAIN}
+          - ${HOOKS_DOMAIN}
+
+  # Local test only (CADDY_TLS=internal): copies Caddy's public root certificate where the non-root web
+  # process can read it; Caddy's data directory is root-only. With a public CA there is nothing to copy.
+  caddy-ca:
+    image: caddy:2-alpine
+    depends_on:
+      caddy:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c", "if [ -f /data/caddy/pki/authorities/local/root.crt ]; then install -m 644 /data/caddy/pki/authorities/local/root.crt /ca/root.crt; fi"]
+    volumes:
+      - caddydata:/data:ro
+      - caddyca:/ca
+    network_mode: none
+
+  # ---------------------------------------------------------------------------------------------
+  # Applications
+  # ---------------------------------------------------------------------------------------------
+  web:
+    image: ${IMAGE_REPO:-datahub}/web:${IMAGE_TAG:-local}
+    build:
+      context: web
+    restart: unless-stopped
+    depends_on:
+      caddy-ca:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: web
+      API_URL: http://api:8080
+      AUTH_URL: https://${APP_DOMAIN}
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
+      AUTH_KEYCLOAK_ID: web
+      AUTH_KEYCLOAK_SECRET: ${WEB_CLIENT_SECRET:?set WEB_CLIENT_SECRET in .env}
+      AUTH_KEYCLOAK_ISSUER: https://${AUTH_DOMAIN}/realms/datahub
+      BRANDING_FILE: config/branding.json
+      # Empty in production (public CA). Local test with CADDY_TLS=internal: Caddy's root certificate.
+      NODE_EXTRA_CA_CERTS: ${WEB_EXTRA_CA_CERTS:-}
+    volumes:
+      - caddyca:/ca:ro
+    networks: [proxy, backend, observability]
+
+  api:
+    image: ${IMAGE_REPO:-datahub}/api:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: src/DataHub.Api/Dockerfile
+    restart: unless-stopped
+    # Not published and not proxied: only web (the BFF) calls it, over the backend network.
+    depends_on:
+      dbutils-migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: api
+      ASPNETCORE_ENVIRONMENT: Production
+      # Runtime role: DML only (docker/postgres-init). Migrations run in dbutils-migrate as the owner.
+      ConnectionStrings__app: Host=postgres;Database=app;Username=${APP_DB_USER};Password=${APP_DB_PASSWORD}
+      ConnectionStrings__auth: Host=postgres;Database=auth;Username=${APP_DB_USER};Password=${APP_DB_PASSWORD}
+      ConnectionStrings__rabbitmq: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      ConnectionStrings__minio: Endpoint=http://minio:9000;AccessKey=${API_S3_ACCESS_KEY};SecretKey=${API_S3_SECRET_KEY}
+      Messaging__ManagementUrl: http://rabbitmq:15672
+      # Keycloak over the private network. Tokens still carry the public issuer (KC_HOSTNAME), which the
+      # metadata fetched from here reports, so issuer validation is unchanged.
+      services__keycloak__http__0: http://keycloak:8080
+      Auth__RequireHttpsMetadata: "false"
+    networks: [backend, observability]
+
+  webhook:
+    image: ${IMAGE_REPO:-datahub}/webhook:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: src/DataHub.Webhook/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+      # The api declares the queue the webhook publishes into (mandatory publish fails otherwise).
+      api:
+        condition: service_started
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: webhook
+      AZURE_FUNCTIONS_ENVIRONMENT: Production
+      # HTTP trigger only: no storage account. Host keys (unused, every function is anonymous) stay on disk.
+      AzureWebJobsSecretStorageType: files
+      ConnectionStrings__rabbitmq: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      ConnectionStrings__minio: Endpoint=http://minio:9000;AccessKey=${WEBHOOK_S3_ACCESS_KEY};SecretKey=${WEBHOOK_S3_SECRET_KEY}
+      Webhook__Authority: http://keycloak:8080/realms/datahub
+      Webhook__RequireHttpsMetadata: "false"
+      Webhook__Senders__container__Schemes__0: hmac
+      Webhook__Senders__container__Schemes__1: bearer
+      Webhook__Senders__container__Secrets__0: ${WEBHOOK_HMAC_SECRET:?set WEBHOOK_HMAC_SECRET in .env}
+      Webhook__Senders__container__Secrets__1: ${WEBHOOK_HMAC_SECRET_PREVIOUS:-}
+      Webhook__Senders__container__ClientId: webhook-container
+    networks: [proxy, backend, observability]
+
+  # One-shot jobs: schema migrations as the owner, then idempotent master data and realm settings.
+  dbutils-migrate:
+    image: ${IMAGE_REPO:-datahub}/dbutils:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: src/DataHub.DbUtils/Dockerfile
+    command: ["migrate", "--context", "All"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: dbutils-migrate
+      DOTNET_ENVIRONMENT: Production
+      ConnectionStrings__app: Host=postgres;Database=app;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__auth: Host=postgres;Database=auth;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__minio: Endpoint=http://minio:9000;AccessKey=${API_S3_ACCESS_KEY};SecretKey=${API_S3_SECRET_KEY}
+    networks: [backend, observability]
+
+  dbutils-seed:
+    image: ${IMAGE_REPO:-datahub}/dbutils:${IMAGE_TAG:-local}
+    command: ["seed", "--master-data", "--keycloak-realm"]
+    # Keycloak can report ready a few seconds before its bootstrap stops answering 503.
+    restart: on-failure:5
+    depends_on:
+      dbutils-migrate:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: dbutils-seed
+      DOTNET_ENVIRONMENT: Production
+      ConnectionStrings__app: Host=postgres;Database=app;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__auth: Host=postgres;Database=auth;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__minio: Endpoint=http://minio:9000;AccessKey=${API_S3_ACCESS_KEY};SecretKey=${API_S3_SECRET_KEY}
+      services__keycloak__http__0: http://keycloak:8080
+      Seed__KeycloakAdminUser: ${KEYCLOAK_ADMIN_USER:-admin}
+      Seed__KeycloakAdminPassword: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
+      Seed__LoginTheme: datahub
+    networks: [backend, observability]
+
+  # ---------------------------------------------------------------------------------------------
+  # Identity
+  # ---------------------------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.6
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
+      # Public URL (token issuer, login pages). Services reach it internally at http://keycloak:8080.
+      KC_HOSTNAME: https://${AUTH_DOMAIN}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # The admin console is only served on the tunnel URL; Caddy answers 404 for /admin publicly.
+      KC_HOSTNAME_ADMIN: ${KEYCLOAK_ADMIN_URL:-http://localhost:8081}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      # Placeholders in the realm import.
+      WEB_BASE_URL: https://${APP_DOMAIN}
+      WEB_CLIENT_SECRET: ${WEB_CLIENT_SECRET}
+      WEBHOOK_CLIENT_SECRET: ${WEBHOOK_CLIENT_SECRET:?set WEBHOOK_CLIENT_SECRET in .env}
+    volumes:
+      - ./aspire/DataHub.AppHost/keycloak/realms:/opt/keycloak/data/import:ro
+      - ./aspire/DataHub.AppHost/keycloak/themes:/opt/keycloak/themes:ro
+    ports:
+      # Admin console, loopback only (tunnel). Needs the `tunnel` network: Docker refuses to publish a port
+      # for a container that only sits on internal networks.
+      - "${KEYCLOAK_ADMIN_BIND:-127.0.0.1:8081}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks: [proxy, backend, observability, tunnel]
+
+  # ---------------------------------------------------------------------------------------------
+  # Data
+  # ---------------------------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    # pg_stat_statements must be preloaded; postgres-exporter reads query rate and slow queries from it.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.max=1000
+      - -c
+      - pg_stat_statements.track=top
+      - -c
+      - log_lock_waits=on
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      APP_DB_USER: ${APP_DB_USER:?set APP_DB_USER in .env}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+      KEYCLOAK_DB_USER: ${KEYCLOAK_DB_USER:?set KEYCLOAK_DB_USER in .env}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Databases app/auth/keycloak and the DML-only runtime role. Runs once, on an empty volume.
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [backend, observability]
+
+  rabbitmq:
+    image: rabbitmq:4.3-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    networks: [backend, observability]
+
+  minio:
+    # minio/minio is no longer published on Docker Hub; Chainguard's build is free and multi-arch.
+    image: cgr.dev/chainguard/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      # /minio/metrics/v3 without a token; only the internal observability network reaches it.
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+      MINIO_UPDATE: "off"
+    volumes:
+      - miniodata:/data
+    # Not on proxy: no public route. Only the api, webhook and one-shot jobs (backend) reach it.
+    networks: [backend, observability]
+
+  # Buckets plus one scoped account each for the api and the webhook, then exits. Idempotent.
+  minio-init:
+    image: ${IMAGE_REPO:-datahub}/minio-init:${IMAGE_TAG:-local}
+    build:
+      context: docker/minio-init
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      API_S3_ACCESS_KEY: ${API_S3_ACCESS_KEY:?set API_S3_ACCESS_KEY in .env}
+      API_S3_SECRET_KEY: ${API_S3_SECRET_KEY:?set API_S3_SECRET_KEY in .env}
+      WEBHOOK_S3_ACCESS_KEY: ${WEBHOOK_S3_ACCESS_KEY:?set WEBHOOK_S3_ACCESS_KEY in .env}
+      WEBHOOK_S3_SECRET_KEY: ${WEBHOOK_S3_SECRET_KEY:?set WEBHOOK_S3_SECRET_KEY in .env}
+    networks: [backend]
+
+volumes:
+  pgdata:
+  rabbitmqdata:
+  miniodata:
+  caddydata:
+  caddyconfig:
+  caddyca:
+
+networks:
+  # Caddy's way in and out: published 80/443, and outbound for the ACME challenge.
+  ingress:
+
+  # internal: true — Docker installs no gateway and no NAT, so nothing on these bridges can open a
+  # connection outside them.
+  proxy:
+    internal: true
+  backend:
+    internal: true
+
+  # Loopback-published admin surfaces (Grafana, Keycloak admin). Docker will not publish a port for a
+  # container that only has internal networks, so this is a normal bridge with IP masquerading off:
+  # without source NAT, outbound packets leave with a private address and are never answered.
+  tunnel:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"

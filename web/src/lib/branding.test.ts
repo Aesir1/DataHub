@@ -66,10 +66,10 @@ describe("branding", () => {
     );
   });
 
-  it("resolves s3:// assets against the public MinIO URL", () => {
-    expect(resolveAsset("s3://branding/login-bg.jpg", "http://minio.test/")).toBe(
-      "http://minio.test/branding/login-bg.jpg",
-    );
-    expect(resolveAsset("/brand/logo.svg", "http://minio.test")).toBe("/brand/logo.svg");
+  it("resolves s3://branding assets to the web app's branding route", () => {
+    expect(resolveAsset("s3://branding/login-bg.jpg")).toBe("/api/branding/login-bg.jpg");
+    expect(resolveAsset("s3://branding/login-bg.jpg", "https://app.test/")).toBe("https://app.test/api/branding/login-bg.jpg");
+    expect(resolveAsset("s3://documents/x.pdf")).toBe("s3://documents/x.pdf");
+    expect(resolveAsset("/brand/logo.svg", "https://app.test")).toBe("/brand/logo.svg");
   });
 });

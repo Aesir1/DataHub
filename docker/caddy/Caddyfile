@@ -1,0 +1,48 @@
+# Public entrypoint. Caddy terminates TLS for every host below and proxies over the internal `proxy`
+# network. CADDY_TLS is an ACME e-mail in production (Let's Encrypt; the names must resolve to this
+# host and ports 80/443 must be reachable) and `internal` for local testing (Caddy's own CA).
+{
+	admin off
+}
+
+(common) {
+	tls {$CADDY_TLS}
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+# Next.js front end and its backend-for-frontend routes (/api/graphql, /api/documents/*, /api/branding/*).
+# The Api and MinIO are not public: document bytes go browser -> web -> api -> MinIO.
+{$APP_DOMAIN} {
+	import common
+	header X-Frame-Options DENY
+	# Documents are at most 25 MB; the api enforces that too.
+	request_body {
+		max_size 26MB
+	}
+	reverse_proxy web:3000
+}
+
+# Keycloak: login, registration and the OIDC endpoints. The admin console is not published; reach it
+# over a tunnel (KEYCLOAK_ADMIN_BIND in .env).
+{$AUTH_DOMAIN} {
+	import common
+	@admin path /admin /admin/*
+	respond @admin 404
+	reverse_proxy keycloak:8080
+}
+
+# Inbound webhooks (Azure Functions). Only the webhook route and the health probe exist publicly.
+{$HOOKS_DOMAIN} {
+	import common
+	@allowed path /api/webhooks/* /api/health
+	handle @allowed {
+		reverse_proxy webhook:80
+	}
+	respond 404
+}

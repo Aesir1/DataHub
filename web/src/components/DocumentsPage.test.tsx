@@ -11,11 +11,11 @@ const doc = (status: "PENDING" | "AVAILABLE") => ({
   sizeBytes: 5,
   status,
   createdAtUtc: "2026-09-25T10:00:00Z",
-  downloadUrl: status === "AVAILABLE" ? "http://minio.test/documents/get" : null,
+  downloadUrl: status === "AVAILABLE" ? "/api/documents/d1/content" : null,
 });
 
 describe("DocumentsPage", () => {
-  it("requests a presigned URL, PUTs the file there, confirms, and lists it as available", async () => {
+  it("requests an upload path, PUTs the file there, confirms, and lists it as available", async () => {
     let stored: string | null = null;
     let confirmed = false;
     server.use(
@@ -28,7 +28,7 @@ describe("DocumentsPage", () => {
           data: {
             requestDocumentUpload: {
               documentUploadPayload: {
-                uploadUrl: "http://minio.test/documents/put?X-Amz-Signature=x",
+                uploadUrl: "/api/documents/d1/content",
                 document: { id: "d1" },
               },
               errors: null,
@@ -36,7 +36,7 @@ describe("DocumentsPage", () => {
           },
         });
       }),
-      http.put("http://minio.test/documents/put", async ({ request }) => {
+      http.put("/api/documents/d1/content", async ({ request }) => {
         expect(request.headers.get("content-type")).toBe("text/plain");
         stored = await request.text();
         return new HttpResponse(null, { status: 200 });
@@ -57,7 +57,7 @@ describe("DocumentsPage", () => {
     });
 
     const link = await screen.findByRole("link", { name: "notes.txt" });
-    expect(link.getAttribute("href")).toBe("http://minio.test/documents/get");
+    expect(link.getAttribute("href")).toBe("/api/documents/d1/content");
     expect(stored).toBe("hello");
     expect(screen.getByText("Available")).toBeTruthy();
   });

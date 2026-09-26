@@ -2,19 +2,15 @@ using DataHub.Application.Abstractions;
 using DataHub.Application.Documents;
 using DataHub.Domain.Documents;
 using DataHub.Domain.Exceptions;
-using Microsoft.Extensions.Time.Testing;
 
 namespace DataHub.Application.Tests;
 
 /// <summary>ST-5 unit level: DocumentService with a faked IObjectStorage.</summary>
 public class DocumentServiceTests
 {
-    private static readonly Uri Presigned = new("http://minio.test/documents/signed");
-
     private readonly IRepository<Document, Guid> repo = Substitute.For<IRepository<Document, Guid>>();
     private readonly IObjectStorage storage = Substitute.For<IObjectStorage>();
     private readonly ICurrentUser user = Substitute.For<ICurrentUser>();
-    private readonly FakeTimeProvider time = new(new DateTimeOffset(2026, 9, 25, 10, 0, 0, TimeSpan.Zero));
     private readonly Guid me = Guid.CreateVersion7();
     private readonly DocumentService service;
 
@@ -24,8 +20,7 @@ public class DocumentServiceTests
         user.Roles.Returns([]);
         repo.AddAsync(Arg.Any<Document>(), Arg.Any<CancellationToken>()).Returns(c => c.Arg<Document>());
         repo.UpdateAsync(Arg.Any<Document>(), Arg.Any<CancellationToken>()).Returns(c => c.Arg<Document>());
-        storage.GetPresignedUrl(default!, default!, default, default, default).ReturnsForAnyArgs(Presigned);
-        service = new DocumentService(repo, storage, user, time);
+        service = new DocumentService(repo, storage, user);
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -38,16 +33,14 @@ public class DocumentServiceTests
     }
 
     [Fact]
-    public async Task Request_upload_creates_pending_row_and_10_minute_put_url()
+    public async Task Request_upload_creates_pending_row_and_same_origin_put_path()
     {
         var upload = await service.RequestUploadAsync(" report.pdf ", "application/pdf", 1024, Ct);
 
         upload.Document.OwnerId.ShouldBe(me);
         upload.Document.FileName.ShouldBe("report.pdf");
         upload.Document.Status.ShouldBe(DocumentStatus.Pending);
-        upload.UploadUrl.ShouldBe(Presigned);
-        upload.ExpiresAtUtc.ShouldBe(time.GetUtcNow().AddMinutes(10));
-        storage.Received(1).GetPresignedUrl(Document.Bucket, $"{me}/{upload.Document.Id}", HttpVerb.Put, TimeSpan.FromMinutes(10), "application/pdf");
+        upload.UploadUrl.ShouldBe($"/api/documents/{upload.Document.Id}/content");
     }
 
     [Theory]
@@ -135,7 +128,7 @@ public class DocumentServiceTests
         var upload = await service.ReplaceContentAsync(document.Id, "image/png", 99, Ct);
 
         (upload.Document.Status, upload.Document.ContentType, upload.Document.SizeBytes).ShouldBe((DocumentStatus.Pending, "image/png", 99L));
-        upload.UploadUrl.ShouldBe(Presigned);
+        upload.UploadUrl.ShouldBe($"/api/documents/{document.Id}/content");
     }
 
     [Fact]
@@ -155,8 +148,43 @@ public class DocumentServiceTests
     [Fact]
     public void Download_url_only_for_available_documents()
     {
-        service.DownloadUrl(new Document { FileName = "a", ContentType = "text/plain", Status = DocumentStatus.Pending }).ShouldBeNull();
-        service.DownloadUrl(new Document { FileName = "a", ContentType = "text/plain", Status = DocumentStatus.Available }).ShouldBe(Presigned);
+        DocumentService.DownloadUrl(new Document { FileName = "a", ContentType = "text/plain", Status = DocumentStatus.Pending }).ShouldBeNull();
+        var available = new Document { FileName = "a", ContentType = "text/plain", Status = DocumentStatus.Available };
+        DocumentService.DownloadUrl(available).ShouldBe($"/api/documents/{available.Id}/content");
+    }
+
+    [Fact]
+    public async Task Upload_content_stores_bytes_for_pending_owned_document()
+    {
+        var document = Owned();
+        using var body = new MemoryStream("x"u8.ToArray());
+
+        await service.UploadContentAsync(document.Id, body, "application/pdf", Ct);
+
+        await storage.Received(1).PutAsync(Document.Bucket, document.ObjectKey, body, "application/pdf", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Upload_content_rejects_other_type_available_document_and_strangers()
+    {
+        using var body = new MemoryStream("x"u8.ToArray());
+
+        await Should.ThrowAsync<ValidationException>(() => service.UploadContentAsync(Owned().Id, body, "image/png", Ct));
+        await Should.ThrowAsync<ConflictException>(() => service.UploadContentAsync(Owned(status: DocumentStatus.Available).Id, body, "application/pdf", Ct));
+        await Should.ThrowAsync<NotFoundException>(() => service.UploadContentAsync(Owned(owner: Guid.CreateVersion7()).Id, body, "application/pdf", Ct));
+        await storage.DidNotReceiveWithAnyArgs().PutAsync(default!, default!, default!, default!, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Open_content_only_for_available_owned_documents()
+    {
+        var available = Owned(status: DocumentStatus.Available);
+        var stored = new StoredObject(new MemoryStream(), "application/pdf", 0);
+        storage.GetAsync(Document.Bucket, available.ObjectKey, Arg.Any<CancellationToken>()).Returns(stored);
+
+        (await service.OpenContentAsync(available.Id, Ct)).Content.ShouldBe(stored);
+        await Should.ThrowAsync<NotFoundException>(() => service.OpenContentAsync(Owned().Id, Ct));
+        await Should.ThrowAsync<NotFoundException>(() => service.OpenContentAsync(Owned(owner: Guid.CreateVersion7(), status: DocumentStatus.Available).Id, Ct));
     }
 
     [Fact]

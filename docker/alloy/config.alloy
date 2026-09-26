@@ -72,9 +72,8 @@ prometheus.remote_write "local" {
 }
 
 // =================================================================================================
-// Container logs: every container the AppHost labels com.docker.compose.project=datahub. The
-// applications are host processes, not containers; their structured, trace-correlated logs arrive
-// over OTLP above.
+// Container logs: every container of project datahub (compose, or labelled by the AppHost). The
+// applications' own logs arrive over OTLP above.
 // =================================================================================================
 
 discovery.docker "containers" {
@@ -89,6 +88,14 @@ discovery.relabel "containers" {
     source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
     regex         = "datahub"
     action        = "keep"
+  }
+
+  // In production (compose.prod.yaml) the applications are containers too. Their structured,
+  // trace-correlated logs already arrive over OTLP, so their stdout would duplicate every line.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "api|webhook|web|dbutils-.*"
+    action        = "drop"
   }
 
   // One label per compose service — bounded set, safe as a Loki stream label.

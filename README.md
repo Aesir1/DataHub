@@ -3,7 +3,7 @@
 DataHub receives container temperature events over a webhook, stores every raw payload in S3-compatible
 object storage, queues it in RabbitMQ, and persists it in PostgreSQL (always in °C). Signed-in users browse
 containers and their readings in a Next.js front end. The solution also carries the platform-template
-samples: Products (generic CRUD repository, outbox, audit consumer), Documents (MinIO presigned uploads)
+samples: Products (generic CRUD repository, outbox, audit consumer), Documents (uploads/downloads streamed through the Api; MinIO is never public)
 and a RabbitMQ queue admin page.
 
 ```
@@ -65,7 +65,7 @@ RabbitMQ stay on plain HTTP on localhost.
 ## Observability
 
 The AppHost also starts the Grafana stack from DieWikinger (`aspire/DataHub.AppHost/Observability.cs`,
-configuration in `aspire/DataHub.AppHost/observability/`):
+configuration in `docker/` at the repository root, shared with `compose.observability.yaml`):
 
 | Resource | Role |
 | --- | --- |
@@ -79,6 +79,49 @@ The .NET services and the web front end export OTLP twice: to the Aspire dashboa
 `com.docker.compose.project=datahub` / `com.docker.compose.service=<resource>` labels, which is what
 cAdvisor, Alloy, the dashboards and the alert rules select on. Aspire only recreates a persistent container
 when its image or environment changes; bump `Observability.StackRevision` after changing container arguments.
+
+## Production (Docker Compose)
+
+`compose.prod.yaml` (+ the included `compose.observability.yaml`) runs everything behind Caddy, which
+obtains the certificates. Configuration: `.env` (copy `.env.example`), `docker/` (Caddy, init scripts,
+observability) and the Keycloak realm/theme under `aspire/DataHub.AppHost/keycloak/`.
+
+| Public host | Service | Notes |
+| --- | --- | --- |
+| `APP_DOMAIN` | web | the Api is not public; web's BFF routes (`/api/graphql`, `/api/documents/*`, `/api/branding/*`) call it |
+| `AUTH_DOMAIN` | keycloak | `/admin` answers 404; the admin console is on the tunnel |
+| `HOOKS_DOMAIN` | webhook | only `/api/webhooks/*` and `/api/health` |
+
+MinIO has no public host and is not on Caddy's network. All buckets are private: document bytes go
+browser → web → Api → MinIO (the Api checks ownership, type and the 25 MB limit), branding assets are
+served by the Api at `/api/branding/<key>`, and raw webhook payloads are written by the webhook.
+
+Networks: `ingress` (Caddy only; 80/443 and the only route to the Internet), `proxy` and `backend`
+(internal: no gateway, no NAT), `observability` (internal), and `tunnel` (Grafana and the Keycloak admin
+console, published on 127.0.0.1 only, IP masquerading off). On a server:
+`ssh -L 3300:localhost:3300 -L 8081:localhost:8081 <server>`, then Grafana at http://localhost:3300 and
+the Keycloak admin console at http://localhost:8081/admin/.
+
+Least privilege: the api connects as a DML-only role (`docker/postgres-init`), migrations run as the owner
+in the one-shot `dbutils-migrate`, and the api and webhook each get their own MinIO account scoped to their
+buckets (`docker/minio-init`). `dbutils-seed` upserts master data and the realm's login theme and default
+role; it creates no users.
+
+Local test on this machine (`*.localhost` resolves to 127.0.0.1, `CADDY_TLS=internal`):
+
+```bash
+cp .env.example .env                                  # change the secrets for anything but a local test
+docker compose -f compose.prod.yaml build
+docker compose -f compose.prod.yaml up -d
+# Trust Caddy's local CA in Chrome/Chromium (NSS) once:
+docker compose -f compose.prod.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
+certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Caddy Local Authority (DataHub)" -i ./caddy-root.crt
+```
+
+Then open https://app.datahub.localhost and register, or create users in the admin console
+(http://localhost:8081/admin/). Caddy needs ports 80 (redirect to HTTPS, ACME) and 443; if another
+web server holds 80 locally, stop it or move `HTTP_PORT`. On a server set real domains, `CADDY_TLS=<acme e-mail>`, an empty
+`WEB_EXTRA_CA_CERTS`, and `IMAGE_REPO`/`IMAGE_TAG` of your registry.
 
 ## Solution layout
 

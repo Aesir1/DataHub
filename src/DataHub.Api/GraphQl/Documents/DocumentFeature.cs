@@ -9,7 +9,7 @@ namespace DataHub.Api.GraphQl.Documents;
 [ExtendObjectType(typeof(RootQuery))]
 public class DocumentQueries : RootQuery
 {
-    /// <summary>Own documents (all for platform-admin) with a 5-minute presigned download URL.</summary>
+    /// <summary>Own documents (all for platform-admin) with their download path.</summary>
     [Authorize(Policy = Permissions.Documents.Read)]
     [UsePaging(MaxPageSize = 100, IncludeTotalCount = true)]
     [UseProjection]
@@ -24,15 +24,16 @@ public class DocumentQueries : RootQuery
     public IQueryable<Document> GetDocument(Guid id, [Service] DocumentService documents) => documents.Query().Where(d => d.Id == id);
 }
 
-public sealed record DocumentUploadPayload(Document Document, Uri UploadUrl, DateTimeOffset ExpiresAtUtc)
+/// <summary>UploadUrl is a same-origin path the browser PUTs the file to (the web BFF forwards it to the Api).</summary>
+public sealed record DocumentUploadPayload(Document Document, string UploadUrl)
 {
-    public static DocumentUploadPayload From(DocumentUpload upload) => new(upload.Document, upload.UploadUrl, upload.ExpiresAtUtc);
+    public static DocumentUploadPayload From(DocumentUpload upload) => new(upload.Document, upload.UploadUrl);
 }
 
 [ExtendObjectType(typeof(RootMutation))]
 public class DocumentMutations : RootMutation
 {
-    /// <summary>Creates a Pending document and returns a presigned PUT URL valid 10 minutes (max 25 MB, allow-listed types).</summary>
+    /// <summary>Creates a Pending document and returns the path to PUT its content to (max 25 MB, allow-listed types).</summary>
     [Authorize(Policy = Permissions.Documents.Write)]
     [Error<ValidationError>]
     [Error<ForbiddenError>]
@@ -90,8 +91,8 @@ public sealed class DocumentType : ObjectType<Document>
         descriptor.Field(d => d.OwnerId).IsProjected(true);
         descriptor.Field(d => d.Status).IsProjected(true);
         descriptor.Field("downloadUrl")
-            .Type<UrlType>()
-            .Description("Presigned GET URL valid 5 minutes; null while the upload is pending.")
-            .Resolve(ctx => ctx.Service<DocumentService>().DownloadUrl(ctx.Parent<Document>()));
+            .Type<StringType>()
+            .Description("Same-origin download path; null while the upload is pending.")
+            .Resolve(ctx => DocumentService.DownloadUrl(ctx.Parent<Document>()));
     }
 }

@@ -1,7 +1,7 @@
 /**
  * AU-5: generates the Keycloak login theme `datahub` from branding.json, so the white-label look continues
  * after the redirect. Output: aspire/DataHub.AppHost/keycloak/themes/datahub/login (bind-mounted by the AppHost).
- * Run: `bun run keycloak-theme` (BRANDING_FILE and MINIO_PUBLIC_URL are honoured). Keycloak picks up a new theme on restart.
+ * Run: `bun run keycloak-theme` (BRANDING_FILE and WEB_BASE_URL are honoured). Keycloak picks up a new theme on restart.
  */
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -17,14 +17,14 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(path.join(out, "resources/css"), { recursive: true });
 mkdirSync(path.join(out, "resources/img"), { recursive: true });
 
-/** Local /public assets are copied into the theme; URLs (and s3:// objects) are referenced as-is. */
+/** Local /public assets are copied into the theme; URLs are referenced as-is, s3:// objects through the web app. */
 function asset(src: string, name: string): string {
   if (src.startsWith("/")) {
     const target = `${name}${path.extname(src)}`;
     copyFileSync(path.join(web, "public", src), path.join(out, "resources/img", target));
     return `../img/${target}`;
   }
-  return resolveAsset(src);
+  return resolveAsset(src, process.env.WEB_BASE_URL ?? "https://localhost:3000");
 }
 
 const p = branding.palette.light;

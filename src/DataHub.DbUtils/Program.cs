@@ -15,7 +15,8 @@ var check = new Option<bool>("--check") { Description = "Exit with code 1 when m
 var force = new Option<bool>("--force") { Description = "Allow reset outside Development." };
 var fixtures = new Option<bool>("--fixtures") { Description = "Insert deterministic fixture data (fixed ids)." };
 var masterData = new Option<bool>("--master-data") { Description = "Upsert reference data from embedded JSON." };
-var keycloakUsers = new Option<bool>("--keycloak-users") { Description = "Create dev users through the Keycloak Admin API." };
+var keycloakUsers = new Option<bool>("--keycloak-users") { Description = "Create dev users through the Keycloak Admin API (includes --keycloak-realm)." };
+var keycloakRealm = new Option<bool>("--keycloak-realm") { Description = "Production-safe realm settings: login theme and default user role." };
 var vacuum = new Option<bool>("--vacuum-analyze") { Description = "VACUUM (ANALYZE) every table of the context." };
 var purge = new Option<bool>("--purge-soft-deleted") { Description = "Hard-delete soft-deleted rows past --older-than." };
 var olderThan = new Option<string>("--older-than") { Description = "Retention for --purge-soft-deleted, e.g. 90d or 12h.", DefaultValueFactory = _ => "90d" };
@@ -53,8 +54,17 @@ resetCommand.SetAction((parse, ct) => Run(async (sp, log) =>
     return 0;
 }));
 
-var seedCommand = new Command("seed", "Seed fixtures, master data and/or Keycloak dev users (idempotent).") { context, fixtures, masterData, keycloakUsers };
-seedCommand.SetAction((parse, ct) => Run((sp, log) => SeedAsync(sp, log, parse.GetValue(context), parse.GetValue(fixtures), parse.GetValue(masterData), parse.GetValue(keycloakUsers), ct)));
+var seedCommand = new Command("seed", "Seed fixtures, master data and/or Keycloak settings (idempotent).") { context, fixtures, masterData, keycloakUsers, keycloakRealm };
+seedCommand.SetAction((parse, ct) => Run(async (sp, log) =>
+{
+    var code = await SeedAsync(sp, log, parse.GetValue(context), parse.GetValue(fixtures), parse.GetValue(masterData), parse.GetValue(keycloakUsers), ct);
+    if (parse.GetValue(keycloakRealm) && !parse.GetValue(keycloakUsers))
+    {
+        await Step(log, "keycloak: realm settings", () => sp.GetRequiredService<KeycloakUsers>().SeedRealmAsync(ct));
+    }
+
+    return code;
+}));
 
 var maintainCommand = new Command("maintain", "Maintenance: vacuum, purge soft-deleted rows, orphan objects.") { context, vacuum, purge, olderThan, orphans, delete };
 maintainCommand.SetAction((parse, ct) => Run(async (sp, log) =>

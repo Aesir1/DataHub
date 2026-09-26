@@ -6,7 +6,8 @@ namespace DataHub.AppHost;
 /// <summary>
 /// The Grafana observability stack from DieWikinger (compose.observability.yaml), run by the AppHost:
 /// Alloy (OTLP in, Docker logs, health probes) → Tempo / Loki / Prometheus → Grafana, plus cAdvisor
-/// and postgres-exporter. Configuration lives in <c>observability/</c>. The Aspire dashboard keeps
+/// and postgres-exporter. Configuration lives in <c>docker/</c> at the repository root, shared with
+/// <c>compose.observability.yaml</c>. The Aspire dashboard keeps
 /// receiving telemetry too; the services export to both.
 /// </summary>
 /// <remarks>
@@ -56,7 +57,8 @@ internal static class Observability
 
     public static ObservabilityStack AddObservability(this IDistributedApplicationBuilder builder, IResourceBuilder<PostgresServerResource> postgres, IResourceBuilder<PostgresDatabaseResource> appDb)
     {
-        var dir = Path.Combine(builder.AppHostDirectory, "observability");
+        // Shared with compose.observability.yaml (production).
+        var dir = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..", "docker"));
         var grafanaPassword = builder.AddParameter("grafana-admin-password", secret: true);
         var exporterPassword = builder.AddParameter("pg-exporter-password", secret: true);
         var postgresPassword = postgres.Resource.PasswordParameter;

@@ -43,7 +43,7 @@ public static class DependencyInjection
             return new ConfigurationManager<OpenIdConnectConfiguration>(
                 $"{o.Authority.TrimEnd('/')}/.well-known/openid-configuration",
                 new OpenIdConnectConfigurationRetriever(),
-                new HttpDocumentRetriever { RequireHttps = !builder.Environment.IsDevelopment() });
+                new HttpDocumentRetriever { RequireHttps = o.RequireHttpsMetadata && !builder.Environment.IsDevelopment() });
         });
 
         services.AddSingleton<BearerVerifier>();

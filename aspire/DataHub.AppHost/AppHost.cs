@@ -50,6 +50,7 @@ var keycloak = builder.AddKeycloak("keycloak", 8080, adminPassword: keycloakAdmi
     .WithEnvironment("KC_DB_PASSWORD", postgresPassword)
     .WithEnvironment("WEB_CLIENT_SECRET", webClientSecret)
     .WithEnvironment("WEBHOOK_CLIENT_SECRET", webhookClientSecret)
+    .WithEnvironment("WEB_BASE_URL", "https://localhost:3000")
     .WaitFor(keycloakDb);
 var keycloakHttp = keycloak.GetEndpoint("http");
 var issuer = ReferenceExpression.Create($"{keycloakHttp}/realms/{realm}");
@@ -161,7 +162,6 @@ var web = builder.AddNextJsApp("web", "../../web")
     .WithEnvironment("AUTH_KEYCLOAK_ID", "web")
     .WithEnvironment("AUTH_KEYCLOAK_SECRET", webClientSecret)
     .WithEnvironment("AUTH_KEYCLOAK_ISSUER", issuer)
-    .WithEnvironment("MINIO_PUBLIC_URL", minio.GetEndpoint("http"))
     .WithEnvironment("BRANDING_FILE", "config/branding.json")
     .WithExternalHttpEndpoints()
     .WithCommand(

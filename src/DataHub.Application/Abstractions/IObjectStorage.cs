@@ -1,11 +1,5 @@
 namespace DataHub.Application.Abstractions;
 
-public enum HttpVerb
-{
-    Get,
-    Put,
-}
-
 public sealed record StoredObject(Stream Content, string ContentType, long SizeBytes) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Content.DisposeAsync();
@@ -26,6 +20,4 @@ public interface IObjectStorage
     Task<IReadOnlyList<ObjectInfo>> ListAsync(string bucket, string? prefix = null, CancellationToken ct = default);
 
     Task DeleteAsync(string bucket, string key, CancellationToken ct = default);
-
-    Uri GetPresignedUrl(string bucket, string key, HttpVerb verb, TimeSpan validFor, string? contentType = null);
 }

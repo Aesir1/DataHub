@@ -1,4 +1,4 @@
-/** Browser → object storage PUT on a presigned URL, with progress (fetch cannot report upload progress). */
+/** Browser PUT to the same-origin content route (forwarded to the Api), with progress (fetch cannot report upload progress). */
 export function uploadWithProgress(
   url: string,
   file: Blob,

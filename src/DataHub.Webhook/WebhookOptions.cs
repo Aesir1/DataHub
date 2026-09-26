@@ -12,6 +12,12 @@ public sealed class WebhookOptions
 
     public string Audience { get; set; } = "webhook";
 
+    /// <summary>
+    /// Require HTTPS for the OpenID metadata/JWKS. Off where Keycloak is reached over a private network
+    /// (production compose: http://keycloak:8080) or locally over plain HTTP.
+    /// </summary>
+    public bool RequireHttpsMetadata { get; set; } = true;
+
     public Dictionary<string, WebhookSender> Senders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

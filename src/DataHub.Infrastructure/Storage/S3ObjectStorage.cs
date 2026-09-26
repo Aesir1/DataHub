@@ -3,7 +3,6 @@ using System.Net;
 using Amazon.S3;
 using Amazon.S3.Model;
 using DataHub.Application.Abstractions;
-using AppHttpVerb = DataHub.Application.Abstractions.HttpVerb;
 
 namespace DataHub.Infrastructure.Storage;
 
@@ -72,18 +71,4 @@ public sealed class S3ObjectStorage(IAmazonS3 s3) : IObjectStorage
     }
 
     public async Task DeleteAsync(string bucket, string key, CancellationToken ct = default) => await s3.DeleteObjectAsync(bucket, key, ct);
-
-    public Uri GetPresignedUrl(string bucket, string key, AppHttpVerb verb, TimeSpan validFor, string? contentType = null)
-    {
-        var request = new GetPreSignedUrlRequest
-        {
-            BucketName = bucket,
-            Key = key,
-            Verb = verb == AppHttpVerb.Put ? Amazon.S3.HttpVerb.PUT : Amazon.S3.HttpVerb.GET,
-            Expires = DateTime.UtcNow.Add(validFor),
-            ContentType = verb == AppHttpVerb.Put ? contentType : null,
-            Protocol = s3.Config.ServiceURL?.StartsWith("http://", StringComparison.OrdinalIgnoreCase) == true ? Protocol.HTTP : Protocol.HTTPS,
-        };
-        return new Uri(s3.GetPreSignedURL(request));
-    }
 }
