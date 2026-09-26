@@ -1,0 +1,833 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+"Every non-abstract subclass is registered as an extension of the Query type (source-generated registration, see GraphQlSetup)."
+type Query {
+  containers(
+    "Returns the first _n_ elements from the list."
+    first: Int
+    "Returns the elements in the list that come after the specified cursor."
+    after: String
+    "Returns the last _n_ elements from the list."
+    last: Int
+    "Returns the elements in the list that come before the specified cursor."
+    before: String
+    where: ContainerFilterInput @cost(weight: "10")
+    order: [ContainerSortInput!] @cost(weight: "10")
+  ): ContainersConnection
+    @authorize(policy: "containers.read")
+    @listSize(
+      assumedSize: 100
+      slicingArguments: ["first", "last"]
+      slicingArgumentDefaultValue: 10
+      sizedFields: ["edges", "nodes"]
+      requireOneSlicingArgument: false
+    )
+    @cost(weight: "10")
+  "Min/max/avg/latest reading of one container (SQL view ContainerSummaries)."
+  containerSummary(containerId: UUID!): ContainerSummary
+    @authorize(policy: "containers.read")
+    @cost(weight: "10")
+  "Readings of one container, oldest first."
+  temperatures(
+    containerId: UUID!
+    "Returns the first _n_ elements from the list."
+    first: Int
+    "Returns the elements in the list that come after the specified cursor."
+    after: String
+    "Returns the last _n_ elements from the list."
+    last: Int
+    "Returns the elements in the list that come before the specified cursor."
+    before: String
+  ): TemperaturesConnection
+    @authorize(policy: "containers.read")
+    @listSize(
+      assumedSize: 100
+      slicingArguments: ["first", "last"]
+      slicingArgumentDefaultValue: 100
+      sizedFields: ["edges", "nodes"]
+      requireOneSlicingArgument: false
+    )
+    @cost(weight: "10")
+  "Own documents (all for platform-admin) with a 5-minute presigned download URL."
+  documents(
+    "Returns the first _n_ elements from the list."
+    first: Int
+    "Returns the elements in the list that come after the specified cursor."
+    after: String
+    "Returns the last _n_ elements from the list."
+    last: Int
+    "Returns the elements in the list that come before the specified cursor."
+    before: String
+    where: DocumentFilterInput @cost(weight: "10")
+    order: [DocumentSortInput!] @cost(weight: "10")
+  ): DocumentsConnection
+    @authorize(policy: "documents.read")
+    @listSize(
+      assumedSize: 100
+      slicingArguments: ["first", "last"]
+      slicingArgumentDefaultValue: 10
+      sizedFields: ["edges", "nodes"]
+      requireOneSlicingArgument: false
+    )
+    @cost(weight: "10")
+  document(id: UUID!): Document
+    @authorize(policy: "documents.read")
+    @cost(weight: "10")
+  queues: [QueueInfo!]! @authorize(policy: "queues.manage") @cost(weight: "10")
+  products(
+    "Returns the first _n_ elements from the list."
+    first: Int
+    "Returns the elements in the list that come after the specified cursor."
+    after: String
+    "Returns the last _n_ elements from the list."
+    last: Int
+    "Returns the elements in the list that come before the specified cursor."
+    before: String
+    where: ProductFilterInput @cost(weight: "10")
+    order: [ProductSortInput!] @cost(weight: "10")
+  ): ProductsConnection
+    @authorize(policy: "products.read")
+    @listSize(
+      assumedSize: 100
+      slicingArguments: ["first", "last"]
+      slicingArgumentDefaultValue: 10
+      sizedFields: ["edges", "nodes"]
+      requireOneSlicingArgument: false
+    )
+    @cost(weight: "10")
+  product(id: UUID!): Product
+    @authorize(policy: "products.read")
+    @cost(weight: "10")
+  "Changes of one product as recorded by the audit consumer, newest first."
+  productAudit(
+    productId: UUID!
+    "Returns the first _n_ elements from the list."
+    first: Int
+    "Returns the elements in the list that come after the specified cursor."
+    after: String
+    "Returns the last _n_ elements from the list."
+    last: Int
+    "Returns the elements in the list that come before the specified cursor."
+    before: String
+  ): ProductAuditConnection
+    @authorize(policy: "products.read")
+    @listSize(
+      assumedSize: 100
+      slicingArguments: ["first", "last"]
+      slicingArgumentDefaultValue: 10
+      sizedFields: ["edges", "nodes"]
+      requireOneSlicingArgument: false
+    )
+    @cost(weight: "10")
+  "The signed-in user, so the UI can show only what the caller may use."
+  viewer: Viewer!
+}
+
+"Every non-abstract subclass is registered as an extension of the Mutation type (source-generated registration, see GraphQlSetup)."
+type Mutation {
+  "Creates a Pending document and returns a presigned PUT URL valid 10 minutes (max 25 MB, allow-listed types)."
+  requestDocumentUpload(input: RequestDocumentUploadInput!): RequestDocumentUploadPayload!
+    @authorize(policy: "documents.write")
+    @cost(weight: "10")
+  confirmDocumentUpload(input: ConfirmDocumentUploadInput!): ConfirmDocumentUploadPayload!
+    @authorize(policy: "documents.write")
+    @cost(weight: "10")
+  renameDocument(input: RenameDocumentInput!): RenameDocumentPayload!
+    @authorize(policy: "documents.write")
+    @cost(weight: "10")
+  replaceDocumentContent(input: ReplaceDocumentContentInput!): ReplaceDocumentContentPayload!
+    @authorize(policy: "documents.write")
+    @cost(weight: "10")
+  deleteDocument(input: DeleteDocumentInput!): DeleteDocumentPayload!
+    @authorize(policy: "documents.write")
+    @cost(weight: "10")
+  "Declares a durable queue bound to domain-events with its own dead-letter queue."
+  declareQueue(input: DeclareQueueInput!): DeclareQueuePayload!
+    @authorize(policy: "queues.manage")
+    @cost(weight: "10")
+  "Removes every ready message; returns how many."
+  purgeQueue(input: PurgeQueueInput!): PurgeQueuePayload!
+    @authorize(policy: "queues.manage")
+    @cost(weight: "10")
+  deleteQueue(input: DeleteQueueInput!): DeleteQueuePayload!
+    @authorize(policy: "queues.manage")
+    @cost(weight: "10")
+  createProduct(input: CreateProductInput!): CreateProductPayload!
+    @authorize(policy: "products.write")
+    @cost(weight: "10")
+  "Pass the rowVersion you read; a concurrent change returns ConcurrencyError."
+  updateProduct(input: UpdateProductInput!): UpdateProductPayload!
+    @authorize(policy: "products.write")
+    @cost(weight: "10")
+  deleteProduct(input: DeleteProductInput!): DeleteProductPayload!
+    @authorize(policy: "products.write")
+    @cost(weight: "10")
+}
+
+type ConcurrencyError implements Error {
+  message: String!
+  code: String!
+}
+
+type ConfirmDocumentUploadPayload {
+  document: Document
+  errors: [ConfirmDocumentUploadError!]
+}
+
+type ConflictError implements Error {
+  message: String!
+  code: String!
+}
+
+"A shipping container identified by its ISO 6346 code (for example MSCU1234567)."
+type Container {
+  "PostgreSQL xmin. Send back the value you read to detect concurrent updates."
+  rowVersion: UnsignedInt!
+  code: String!
+  id: UUID!
+  createdAtUtc: DateTime!
+  createdBy: String
+  updatedAtUtc: DateTime
+  updatedBy: String
+}
+
+"A connection to a list of items."
+type ContainersConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [ContainersEdge!]
+  "A flattened list of the nodes."
+  nodes: [Container!]
+  "Identifies the total count of items in the connection."
+  totalCount: Int! @cost(weight: "10")
+}
+
+"An edge in a connection."
+type ContainersEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: Container!
+}
+
+"Read model backed by the ContainerSummaries SQL view."
+type ContainerSummary {
+  containerId: UUID!
+  readings: Int!
+  minCelsius: Decimal
+  maxCelsius: Decimal
+  avgCelsius: Decimal
+  lastCelsius: Decimal
+  lastTimestampUtc: DateTime
+}
+
+type CreateProductPayload {
+  product: Product
+  errors: [CreateProductError!]
+}
+
+type DeclareQueuePayload {
+  string: String
+}
+
+type DeleteDocumentPayload {
+  uuid: UUID
+  errors: [DeleteDocumentError!]
+}
+
+type DeleteProductPayload {
+  uuid: UUID
+  errors: [DeleteProductError!]
+}
+
+type DeleteQueuePayload {
+  string: String
+}
+
+"Metadata in PostgreSQL; bytes in object storage under ObjectKey."
+type Document {
+  "PostgreSQL xmin. Send back the value you read to detect concurrent updates."
+  rowVersion: UnsignedInt!
+  id: UUID!
+  ownerId: UUID!
+  status: DocumentStatus!
+  "Presigned GET URL valid 5 minutes; null while the upload is pending."
+  downloadUrl: URL @cost(weight: "10")
+  fileName: String!
+  contentType: String!
+  sizeBytes: Long!
+  createdAtUtc: DateTime!
+  createdBy: String
+  updatedAtUtc: DateTime
+  updatedBy: String
+}
+
+"A connection to a list of items."
+type DocumentsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [DocumentsEdge!]
+  "A flattened list of the nodes."
+  nodes: [Document!]
+  "Identifies the total count of items in the connection."
+  totalCount: Int! @cost(weight: "10")
+}
+
+"An edge in a connection."
+type DocumentsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: Document!
+}
+
+type DocumentUploadPayload {
+  document: Document!
+  uploadUrl: URI!
+  expiresAtUtc: DateTime!
+}
+
+type FieldError {
+  field: String!
+  messages: [String!]!
+}
+
+type ForbiddenError implements Error {
+  message: String!
+  code: String!
+}
+
+type NotFoundError implements Error {
+  message: String!
+  code: String!
+}
+
+"Information about pagination in a connection."
+type PageInfo {
+  "Indicates whether more edges exist following the set defined by the clients arguments."
+  hasNextPage: Boolean!
+  "Indicates whether more edges exist prior the set defined by the clients arguments."
+  hasPreviousPage: Boolean!
+  "When paginating backwards, the cursor to continue."
+  startCursor: String
+  "When paginating forwards, the cursor to continue."
+  endCursor: String
+}
+
+type Product {
+  "PostgreSQL xmin. Send back the value you read to detect concurrent updates."
+  rowVersion: UnsignedInt!
+  name: String!
+  sku: String!
+  price: Decimal!
+  "Archived products are hidden from queries by ProductRepository."
+  isArchived: Boolean!
+  id: UUID!
+  createdAtUtc: DateTime!
+  createdBy: String
+  updatedAtUtc: DateTime
+  updatedBy: String
+}
+
+"Stored by the audit consumer, one row per consumed ProductChanged."
+type ProductAudit {
+  productId: UUID!
+  product: Product @cost(weight: "10")
+  id: UUID!
+  change: ChangeType!
+  name: String!
+  price: Decimal!
+  "RabbitMQ message-id; unique, so redelivery is a no-op."
+  messageId: String!
+  occurredAtUtc: DateTime!
+}
+
+"A connection to a list of items."
+type ProductAuditConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [ProductAuditEdge!]
+  "A flattened list of the nodes."
+  nodes: [ProductAudit!]
+}
+
+"An edge in a connection."
+type ProductAuditEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: ProductAudit!
+}
+
+"A connection to a list of items."
+type ProductsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [ProductsEdge!]
+  "A flattened list of the nodes."
+  nodes: [Product!]
+  "Identifies the total count of items in the connection."
+  totalCount: Int! @cost(weight: "10")
+}
+
+"An edge in a connection."
+type ProductsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: Product!
+}
+
+type PurgeQueuePayload {
+  unsignedInt: UnsignedInt
+}
+
+type QueueInfo {
+  messages: UnsignedInt!
+  consumers: UnsignedInt!
+  name: String!
+}
+
+type RenameDocumentPayload {
+  document: Document
+  errors: [RenameDocumentError!]
+}
+
+type ReplaceDocumentContentPayload {
+  documentUploadPayload: DocumentUploadPayload
+  errors: [ReplaceDocumentContentError!]
+}
+
+type RequestDocumentUploadPayload {
+  documentUploadPayload: DocumentUploadPayload
+  errors: [RequestDocumentUploadError!]
+}
+
+"One temperature reading, always stored in degrees Celsius."
+type Temperature {
+  containerId: UUID!
+  container: Container @cost(weight: "10")
+  id: UUID!
+  timestampUtc: DateTime!
+  celsius: Decimal!
+}
+
+"A connection to a list of items."
+type TemperaturesConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [TemperaturesEdge!]
+  "A flattened list of the nodes."
+  nodes: [Temperature!]
+}
+
+"An edge in a connection."
+type TemperaturesEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: Temperature!
+}
+
+type UpdateProductPayload {
+  product: Product
+  errors: [UpdateProductError!]
+}
+
+type ValidationError implements Error {
+  message: String!
+  fields: [FieldError!]!
+  code: String!
+}
+
+type Viewer {
+  id: UUID
+  email: String
+  roles: [String!]!
+  permissions: [String!]!
+}
+
+interface Error {
+  message: String!
+}
+
+union ConfirmDocumentUploadError = NotFoundError | ConflictError
+
+union CreateProductError = ValidationError | ConflictError
+
+union DeleteDocumentError = NotFoundError
+
+union DeleteProductError = NotFoundError
+
+union RenameDocumentError = NotFoundError | ValidationError
+
+union ReplaceDocumentContentError = NotFoundError | ValidationError
+
+union RequestDocumentUploadError = ValidationError | ForbiddenError
+
+union UpdateProductError = NotFoundError | ValidationError | ConcurrencyError
+
+input BooleanOperationFilterInput {
+  eq: Boolean @cost(weight: "10")
+  neq: Boolean @cost(weight: "10")
+}
+
+input ConfirmDocumentUploadInput {
+  id: UUID!
+}
+
+"A shipping container identified by its ISO 6346 code (for example MSCU1234567)."
+input ContainerFilterInput {
+  and: [ContainerFilterInput!]
+  or: [ContainerFilterInput!]
+  code: StringOperationFilterInput
+  id: UuidOperationFilterInput
+  createdAtUtc: DateTimeOperationFilterInput
+  createdBy: StringOperationFilterInput
+  updatedAtUtc: DateTimeOperationFilterInput
+  updatedBy: StringOperationFilterInput
+  "PostgreSQL xmin. Send back the value you read to detect concurrent updates."
+  rowVersion: UnsignedIntOperationFilterInput
+}
+
+"A shipping container identified by its ISO 6346 code (for example MSCU1234567)."
+input ContainerSortInput {
+  code: SortEnumType @cost(weight: "10")
+  id: SortEnumType @cost(weight: "10")
+  createdAtUtc: SortEnumType @cost(weight: "10")
+  createdBy: SortEnumType @cost(weight: "10")
+  updatedAtUtc: SortEnumType @cost(weight: "10")
+  updatedBy: SortEnumType @cost(weight: "10")
+  "PostgreSQL xmin. Send back the value you read to detect concurrent updates."
+  rowVersion: SortEnumType @cost(weight: "10")
+}
+
+input CreateProductInput {
+  name: String!
+  sku: String!
+  price: Decimal!
+}
+
+input DateTimeOperationFilterInput {
+  eq: DateTime @cost(weight: "10")
+  neq: DateTime @cost(weight: "10")
+  in: [DateTime] @cost(weight: "10")
+  nin: [DateTime] @cost(weight: "10")
+  gt: DateTime @cost(weight: "10")
+  ngt: DateTime @cost(weight: "10")
+  gte: DateTime @cost(weight: "10")
+  ngte: DateTime @cost(weight: "10")
+  lt: DateTime @cost(weight: "10")
+  nlt: DateTime @cost(weight: "10")
+  lte: DateTime @cost(weight: "10")
+  nlte: DateTime @cost(weight: "10")
+}
+
+input DecimalOperationFilterInput {
+  eq: Decimal @cost(weight: "10")
+  neq: Decimal @cost(weight: "10")
+  in: [Decimal] @cost(weight: "10")
+  nin: [Decimal] @cost(weight: "10")
+  gt: Decimal @cost(weight: "10")
+  ngt: Decimal @cost(weight: "10")
+  gte: Decimal @cost(weight: "10")
+  ngte: Decimal @cost(weight: "10")
+  lt: Decimal @cost(weight: "10")
+  nlt: Decimal @cost(weight: "10")
+  lte: Decimal @cost(weight: "10")
+  nlte: Decimal @cost(weight: "10")
+}
+
+input DeclareQueueInput {
+  name: String!
+  routingKey: String!
+}
+
+input DeleteDocumentInput {
+  id: UUID!
+}
+
+input DeleteProductInput {
+  id: UUID!
+}
+
+input DeleteQueueInput {
+  name: String!
+  ifUnused: Boolean!
+}
+
+"Metadata in PostgreSQL; bytes in object storage under ObjectKey."
+input DocumentFilterInput {
+  and: [DocumentFilterInput!]
+  or: [DocumentFilterInput!]
+  ownerId: UuidOperationFilterInput
+  fileName: StringOperationFilterInput
+  contentType: StringOperationFilterInput
+  sizeBytes: LongOperationFilterInput
+  status: DocumentStatusOperationFilterInput
+  id: UuidOperationFilterInput
+  createdAtUtc: DateTimeOperationFilterInput
+  createdBy: StringOperationFilterInput
+  updatedAtUtc: DateTimeOperationFilterInput
+  updatedBy: StringOperationFilterInput
+  "PostgreSQL xmin. Send back the value you read to detect concurrent updates."
+  rowVersion: UnsignedIntOperationFilterInput
+}
+
+"Metadata in PostgreSQL; bytes in object storage under ObjectKey."
+input DocumentSortInput {
+  ownerId: SortEnumType @cost(weight: "10")
+  fileName: SortEnumType @cost(weight: "10")
+  contentType: SortEnumType @cost(weight: "10")
+  sizeBytes: SortEnumType @cost(weight: "10")
+  status: SortEnumType @cost(weight: "10")
+  id: SortEnumType @cost(weight: "10")
+  createdAtUtc: SortEnumType @cost(weight: "10")
+  createdBy: SortEnumType @cost(weight: "10")
+  updatedAtUtc: SortEnumType @cost(weight: "10")
+  updatedBy: SortEnumType @cost(weight: "10")
+  "PostgreSQL xmin. Send back the value you read to detect concurrent updates."
+  rowVersion: SortEnumType @cost(weight: "10")
+}
+
+input DocumentStatusOperationFilterInput {
+  eq: DocumentStatus @cost(weight: "10")
+  neq: DocumentStatus @cost(weight: "10")
+  in: [DocumentStatus!] @cost(weight: "10")
+  nin: [DocumentStatus!] @cost(weight: "10")
+}
+
+input ListFilterInputTypeOfTemperatureFilterInput {
+  all: TemperatureFilterInput @cost(weight: "10")
+  none: TemperatureFilterInput @cost(weight: "10")
+  some: TemperatureFilterInput @cost(weight: "10")
+  any: Boolean @cost(weight: "10")
+}
+
+input LongOperationFilterInput {
+  eq: Long @cost(weight: "10")
+  neq: Long @cost(weight: "10")
+  in: [Long] @cost(weight: "10")
+  nin: [Long] @cost(weight: "10")
+  gt: Long @cost(weight: "10")
+  ngt: Long @cost(weight: "10")
+  gte: Long @cost(weight: "10")
+  ngte: Long @cost(weight: "10")
+  lt: Long @cost(weight: "10")
+  nlt: Long @cost(weight: "10")
+  lte: Long @cost(weight: "10")
+  nlte: Long @cost(weight: "10")
+}
+
+input ProductFilterInput {
+  and: [ProductFilterInput!]
+  or: [ProductFilterInput!]
+  name: StringOperationFilterInput
+  sku: StringOperationFilterInput
+  price: DecimalOperationFilterInput
+  "Archived products are hidden from queries by ProductRepository."
+  isArchived: BooleanOperationFilterInput
+  id: UuidOperationFilterInput
+  createdAtUtc: DateTimeOperationFilterInput
+  createdBy: StringOperationFilterInput
+  updatedAtUtc: DateTimeOperationFilterInput
+  updatedBy: StringOperationFilterInput
+  "PostgreSQL xmin. Send back the value you read to detect concurrent updates."
+  rowVersion: UnsignedIntOperationFilterInput
+}
+
+input ProductSortInput {
+  name: SortEnumType @cost(weight: "10")
+  sku: SortEnumType @cost(weight: "10")
+  price: SortEnumType @cost(weight: "10")
+  "Archived products are hidden from queries by ProductRepository."
+  isArchived: SortEnumType @cost(weight: "10")
+  id: SortEnumType @cost(weight: "10")
+  createdAtUtc: SortEnumType @cost(weight: "10")
+  createdBy: SortEnumType @cost(weight: "10")
+  updatedAtUtc: SortEnumType @cost(weight: "10")
+  updatedBy: SortEnumType @cost(weight: "10")
+  "PostgreSQL xmin. Send back the value you read to detect concurrent updates."
+  rowVersion: SortEnumType @cost(weight: "10")
+}
+
+input PurgeQueueInput {
+  name: String!
+}
+
+input RenameDocumentInput {
+  id: UUID!
+  fileName: String!
+}
+
+input ReplaceDocumentContentInput {
+  id: UUID!
+  contentType: String!
+  sizeBytes: Long!
+}
+
+input RequestDocumentUploadInput {
+  fileName: String!
+  contentType: String!
+  sizeBytes: Long!
+}
+
+input StringOperationFilterInput {
+  and: [StringOperationFilterInput!]
+  or: [StringOperationFilterInput!]
+  eq: String @cost(weight: "10")
+  neq: String @cost(weight: "10")
+  contains: String @cost(weight: "20")
+  ncontains: String @cost(weight: "20")
+  in: [String] @cost(weight: "10")
+  nin: [String] @cost(weight: "10")
+  startsWith: String @cost(weight: "20")
+  nstartsWith: String @cost(weight: "20")
+  endsWith: String @cost(weight: "20")
+  nendsWith: String @cost(weight: "20")
+}
+
+"One temperature reading, always stored in degrees Celsius."
+input TemperatureFilterInput {
+  and: [TemperatureFilterInput!]
+  or: [TemperatureFilterInput!]
+  id: UuidOperationFilterInput
+  containerId: UuidOperationFilterInput
+  container: ContainerFilterInput
+  timestampUtc: DateTimeOperationFilterInput
+  celsius: DecimalOperationFilterInput
+}
+
+input UnsignedIntOperationFilterInput {
+  eq: UnsignedInt @cost(weight: "10")
+  neq: UnsignedInt @cost(weight: "10")
+  in: [UnsignedInt] @cost(weight: "10")
+  nin: [UnsignedInt] @cost(weight: "10")
+  gt: UnsignedInt @cost(weight: "10")
+  ngt: UnsignedInt @cost(weight: "10")
+  gte: UnsignedInt @cost(weight: "10")
+  ngte: UnsignedInt @cost(weight: "10")
+  lt: UnsignedInt @cost(weight: "10")
+  nlt: UnsignedInt @cost(weight: "10")
+  lte: UnsignedInt @cost(weight: "10")
+  nlte: UnsignedInt @cost(weight: "10")
+}
+
+input UpdateProductInput {
+  id: UUID!
+  name: String!
+  price: Decimal!
+  isArchived: Boolean!
+  rowVersion: UnsignedInt!
+}
+
+input UuidOperationFilterInput {
+  eq: UUID @cost(weight: "10")
+  neq: UUID @cost(weight: "10")
+  in: [UUID] @cost(weight: "10")
+  nin: [UUID] @cost(weight: "10")
+  gt: UUID @cost(weight: "10")
+  ngt: UUID @cost(weight: "10")
+  gte: UUID @cost(weight: "10")
+  ngte: UUID @cost(weight: "10")
+  lt: UUID @cost(weight: "10")
+  nlt: UUID @cost(weight: "10")
+  lte: UUID @cost(weight: "10")
+  nlte: UUID @cost(weight: "10")
+}
+
+"Defines when a policy shall be executed."
+enum ApplyPolicy {
+  "Before the resolver was executed."
+  BEFORE_RESOLVER
+  "After the resolver was executed."
+  AFTER_RESOLVER
+  "The policy is applied in the validation step before the execution."
+  VALIDATION
+}
+
+enum ChangeType {
+  CREATED
+  UPDATED
+  DELETED
+}
+
+enum DocumentStatus {
+  PENDING
+  AVAILABLE
+}
+
+enum SortEnumType {
+  ASC
+  DESC
+}
+
+"The `DateTime` scalar type represents a date and time with time zone offset information."
+scalar DateTime
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/date-time.html")
+
+"The `Decimal` scalar type represents a decimal floating-point number with high precision."
+scalar Decimal
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/decimal.html")
+
+"The `Long` scalar type represents a signed 64-bit integer."
+scalar Long
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/long.html")
+
+"The `UnsignedInt` scalar type represents an unsigned 32-bit integer."
+scalar UnsignedInt
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/unsigned-int.html")
+
+"The `URI` scalar type represents a Uniform Resource Identifier (URI) as defined by RFC 3986."
+scalar URI @specifiedBy(url: "https://scalars.graphql.org/chillicream/uri.html")
+
+"The `URL` scalar type represents a Uniform Resource Locator (URL) as defined by RFC 3986."
+scalar URL @specifiedBy(url: "https://scalars.graphql.org/chillicream/url.html")
+
+"The `UUID` scalar type represents a Universally Unique Identifier (UUID) as defined by RFC 9562."
+scalar UUID
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/uuid.html")
+
+"The authorize directive."
+directive @authorize(
+  "The name of the authorization policy that determines access to the annotated resource."
+  policy: String
+  "Roles that are allowed to access the annotated resource."
+  roles: [String!]
+  "Defines when the authorize directive shall be applied. By default the authorize directive is applied before the resolver is executed."
+  apply: ApplyPolicy! = BEFORE_RESOLVER
+) repeatable on OBJECT | FIELD_DEFINITION
+
+"The purpose of the `cost` directive is to define a `weight` for GraphQL types, fields, and arguments. Static analysis can use these weights when calculating the overall cost of a query or response."
+directive @cost(
+  "The `weight` argument defines what value to add to the overall cost for every appearance, or possible appearance, of a type, field, argument, etc."
+  weight: String!
+) on
+  | SCALAR
+  | OBJECT
+  | FIELD_DEFINITION
+  | ARGUMENT_DEFINITION
+  | ENUM
+  | INPUT_FIELD_DEFINITION
+
+"The purpose of the `@listSize` directive is to either inform the static analysis about the size of returned lists (if that information is statically available), or to point the analysis to where to find that information."
+directive @listSize(
+  "The `assumedSize` argument can be used to statically define the maximum length of a list returned by a field."
+  assumedSize: Int
+  "The `slicingArguments` argument can be used to define which of the field's arguments with numeric type are slicing arguments, so that their value determines the size of the list returned by that field. It may specify a list of multiple slicing arguments."
+  slicingArguments: [String!]
+  "The `slicingArgumentDefaultValue` argument can be used to define a default value for a slicing argument, which is used if the argument is not present in a query."
+  slicingArgumentDefaultValue: Int
+  "The `sizedFields` argument can be used to define that the value of the `assumedSize` argument or of a slicing argument does not affect the size of a list returned by a field itself, but that of a list returned by one of its sub-fields."
+  sizedFields: [String!]
+  "The `requireOneSlicingArgument` argument can be used to inform the static analysis that it should expect that exactly one of the defined slicing arguments is present in a query. If that is not the case (i.e., if none or multiple slicing arguments are present), the static analysis may throw an error."
+  requireOneSlicingArgument: Boolean = true
+) on FIELD_DEFINITION

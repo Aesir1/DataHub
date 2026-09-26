@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.RabbitMq" />
+    <PackageReference Include="Testcontainers.Minio" />
+    <ProjectReference Include="..\..\src\DataHub.Api\DataHub.Api.csproj" />
+    <!-- Aliased: DbUtils has its own top-level Program. Used only to seed the Auth master data. -->
+    <ProjectReference Include="..\..\src\DataHub.DbUtils\DataHub.DbUtils.csproj" Aliases="dbutils" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="NSubstitute" />
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
