@@ -1,0 +1,61 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+
+[*.{json,yml,yaml,ts,tsx,js,mjs,css,md,csproj,props,targets}]
+indent_size = 2
+
+[*.cs]
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_prefer_primary_constructors = true:suggestion
+
+# StyleCop: keep the rules that catch real problems, drop the ones that fight modern C#.
+dotnet_diagnostic.SA1101.severity = none   # prefix local calls with this
+dotnet_diagnostic.SA1309.severity = none   # field names must not begin with underscore
+dotnet_diagnostic.SA1600.severity = none   # elements must be documented
+dotnet_diagnostic.SA1601.severity = none
+dotnet_diagnostic.SA1602.severity = none
+dotnet_diagnostic.SA1633.severity = none   # file header
+dotnet_diagnostic.SA1200.severity = none   # usings inside namespace
+dotnet_diagnostic.SA1413.severity = none   # trailing commas
+dotnet_diagnostic.SA1649.severity = none   # file name must match first type
+dotnet_diagnostic.SA1402.severity = none   # one type per file (records/DTOs grouped)
+dotnet_diagnostic.SA1313.severity = none   # parameter names (primary ctor records)
+dotnet_diagnostic.SA1010.severity = none   # collection expression spacing
+dotnet_diagnostic.SA1000.severity = none   # new() spacing
+dotnet_diagnostic.SA1611.severity = none   # param docs
+dotnet_diagnostic.SA1615.severity = none   # return docs
+dotnet_diagnostic.SA1623.severity = none   # "Gets or sets" summaries
+dotnet_diagnostic.SA1642.severity = none   # constructor summary text
+dotnet_diagnostic.SA1201.severity = none   # element order across grouped types
+dotnet_diagnostic.SA1204.severity = none   # static before instance members
+dotnet_diagnostic.SA1202.severity = none   # public before protected members
+dotnet_diagnostic.SA1618.severity = none   # type parameter docs
+dotnet_diagnostic.CA1848.severity = none   # LoggerMessage delegates
+dotnet_diagnostic.S1075.severity = none    # hardcoded URIs (Aspire service-discovery names)
+dotnet_diagnostic.CA1873.severity = none   # expensive log argument (pairs with CA1848)
+dotnet_diagnostic.CA1062.severity = none   # nullable reference types cover this
+dotnet_diagnostic.CA2007.severity = none   # ConfigureAwait (no sync context in ASP.NET Core)
+dotnet_diagnostic.CA1515.severity = none   # make public types internal
+
+[tests/**.cs]
+dotnet_diagnostic.CA1707.severity = none   # underscores in test names
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.SA1202.severity = none   # member order in test classes
+dotnet_diagnostic.SA1204.severity = none
+
+[**/Migrations/**.cs]
+generated_code = true

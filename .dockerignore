@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/.next/
+**/TestResults/
+.git/
+.idea/
+graphify-out/
+web/test-results/
+web/playwright-report/
+**/appsettings.User.json

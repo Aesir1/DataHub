@@ -2,4 +2,10 @@ bin/
 obj/
 /packages/
 riderModule.iml
-/_ReSharper.Caches/
+/_ReSharper.Caches/appsettings.User.json
+node_modules/
+.next/
+*.received.*
+TestResults/
+web/schema-settings.json
+*.tsbuildinfo
