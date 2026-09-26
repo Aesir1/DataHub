@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="Testcontainers.RabbitMq" />
+    <ProjectReference Include="..\..\src\DataHub.Webhook\DataHub.Webhook.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="NSubstitute" />
+  </ItemGroup>
+</Project>
