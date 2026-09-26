@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="NetArchTest.Rules" />
+    <ProjectReference Include="..\..\src\DataHub.Domain\DataHub.Domain.csproj" />
+    <ProjectReference Include="..\..\src\DataHub.Application\DataHub.Application.csproj" />
+    <ProjectReference Include="..\..\src\DataHub.Infrastructure\DataHub.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\DataHub.Auth\DataHub.Auth.csproj" />
+    <ProjectReference Include="..\..\src\DataHub.Webhook\DataHub.Webhook.csproj" />
+  </ItemGroup>
+</Project>
