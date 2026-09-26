@@ -1,0 +1,138 @@
+# Rolls production back to an earlier release without building anything.
+#
+# Actions -> rollback -> Run workflow. Leave "sha" empty for the release before the current one, or
+# give the full commit SHA of any release that was deployed before. If that release's files were
+# already pruned from the server (only the last 5 are kept), they are uploaded again from git; its
+# images come from GHCR.
+#
+# Database migrations are not reverted (see server-provision/README.md, "Rollback").
+name: rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Full 40-character commit SHA to roll back to (empty = previous release)"
+        required: false
+        type: string
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+      AUTH_DOMAIN: ${{ vars.AUTH_DOMAIN }}
+      HOOKS_DOMAIN: ${{ vars.HOOKS_DOMAIN }}
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+      INPUT_SHA: ${{ inputs.sha }}
+    steps:
+      # Human input ends up in a remote shell command: anything but 40 hex characters stops here.
+      - name: Validate input
+        run: |
+          if [ -n "$INPUT_SHA" ] && ! [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::not a full 40-character commit SHA: $INPUT_SHA"; exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host server
+            HostName $SSH_HOST
+            Port $SSH_PORT
+            User $SSH_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ServerAliveInterval 30
+          EOF
+
+      - name: Resolve target
+        id: target
+        run: |
+          sha="$INPUT_SHA"
+          [ -n "$sha" ] || sha="$(ssh server "bash datahub/current/server-provision/release.sh previous")"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no earlier release found on the server"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if ssh server "test -f datahub/releases/$sha/compose.prod.yaml"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "current: $(ssh server "readlink datahub/current" || true), target: $sha"
+
+      # The stack files that shipped with that release, not today's: an old image under a newer
+      # compose file breaks on every setting added since.
+      - uses: actions/checkout@v4
+        if: steps.target.outputs.present == 'false'
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          path: release
+
+      - name: Upload the release files again
+        if: steps.target.outputs.present == 'false'
+        working-directory: release
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          ssh server "mkdir -p datahub/releases/$SHA"
+          rsync -azR --delete \
+            compose.prod.yaml compose.observability.yaml .env.example docker \
+            aspire/DataHub.AppHost/keycloak/realms aspire/DataHub.AppHost/keycloak/themes \
+            server-provision \
+            "server:datahub/releases/$SHA/"
+          printf 'IMAGE_REPO=ghcr.io/%s\nIMAGE_TAG=%s\n' "${GITHUB_REPOSITORY,,}" "$SHA" | ssh server "cat > datahub/releases/$SHA/.release"
+
+      - name: Registry login on the server
+        # Needed only when the images of that release were pruned from the server.
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$TOKEN" | ssh server "docker login ghcr.io --username '$ACTOR' --password-stdin"
+
+      - name: Roll back
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: ssh server "bash datahub/releases/$SHA/server-provision/release.sh rollback $SHA"
+
+      - name: Registry logout on the server
+        if: always()
+        run: ssh server "docker logout ghcr.io" || true
+
+      - name: Smoke test
+        run: bash server-provision/tests/test-smoke.sh
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Rollback to \`${{ steps.target.outputs.sha }}\`"
+            echo ""
+            echo "The next successful deploy of main replaces this release again. Fix forward, or run this"
+            echo "workflow again with another SHA."
+            echo ""
+            echo '```'
+            ssh server "bash datahub/current/server-provision/release.sh status" 2>&1 | head -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

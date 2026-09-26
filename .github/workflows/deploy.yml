@@ -1,0 +1,185 @@
+# Deploys main to the production server once ci has passed for that commit.
+#
+#   ci (green on main) -> build + push images to GHCR, tagged with the commit SHA
+#                      -> upload the stack files as ~/datahub/releases/<sha> on the server
+#                      -> release.sh activate <sha>: pull, up, wait until every service is healthy
+#                      -> smoke test through Caddy, then the external security check
+#   activation fails   -> release.sh restore   (the previous release is started again)
+#   smoke test fails   -> release.sh rollback  (back to the previous release)
+#
+# Setup (secrets, variables, server): server-provision/README.md.
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# One deployment at a time, shared with rollback.yml; a running one is never cancelled.
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  images:
+    # workflow_run's branch filter matches the head branch name, which a fork's pull request can also
+    # call "main": deploy only green push runs of this repository.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - { name: api, context: ., dockerfile: src/DataHub.Api/Dockerfile }
+          - { name: webhook, context: ., dockerfile: src/DataHub.Webhook/Dockerfile }
+          - { name: dbutils, context: ., dockerfile: src/DataHub.DbUtils/Dockerfile }
+          - { name: web, context: web, dockerfile: web/Dockerfile }
+          - { name: minio-init, context: docker/minio-init, dockerfile: docker/minio-init/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - name: Image repository
+        id: repo
+        # GHCR rejects upper case; the repository slug may have some.
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+        if: contains(vars.SERVER_PLATFORMS || 'linux/amd64', 'arm64')
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ vars.SERVER_PLATFORMS || 'linux/amd64' }}
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.repo.outputs.name }}/${{ matrix.name }}:${{ env.SHA }}
+          labels: org.opencontainers.image.revision=${{ env.SHA }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    needs: images
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+      AUTH_DOMAIN: ${{ vars.AUTH_DOMAIN }}
+      HOOKS_DOMAIN: ${{ vars.HOOKS_DOMAIN }}
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned host key: never StrictHostKeyChecking=no, that would accept a man in the middle.
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host server
+            HostName $SSH_HOST
+            Port $SSH_PORT
+            User $SSH_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ServerAliveInterval 30
+          EOF
+
+      - name: Upload release files
+        run: |
+          ssh server "mkdir -p datahub/releases/$SHA"
+          # Only what compose needs at runtime; -R keeps the relative paths.
+          rsync -azR --delete \
+            compose.prod.yaml compose.observability.yaml .env.example docker \
+            aspire/DataHub.AppHost/keycloak/realms aspire/DataHub.AppHost/keycloak/themes \
+            server-provision \
+            "server:datahub/releases/$SHA/"
+
+      - name: Registry login on the server
+        # The run-scoped GITHUB_TOKEN over stdin (never an argument, which would show in ps). It
+        # expires with this job and the last step logs out, so no registry credential stays behind.
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$TOKEN" | ssh server "docker login ghcr.io --username '$ACTOR' --password-stdin"
+
+      - name: Activate
+        id: activate
+        run: ssh server "IMAGE_REPO='ghcr.io/${GITHUB_REPOSITORY,,}' bash datahub/releases/$SHA/server-provision/release.sh activate $SHA"
+
+      - name: Smoke test
+        id: smoke
+        run: bash server-provision/tests/test-smoke.sh
+
+      - name: Restore the previous release (activation failed)
+        if: failure() && steps.activate.outcome == 'failure'
+        run: ssh server "bash datahub/current/server-provision/release.sh restore"
+
+      - name: Roll back (smoke test failed)
+        if: failure() && steps.smoke.outcome == 'failure'
+        run: |
+          ssh server "bash datahub/current/server-provision/release.sh rollback"
+          echo "::error::smoke test failed for $SHA; rolled back to the previous release"
+
+      - name: External security check
+        # Runs after a healthy deploy. A failure marks the run red but does not roll back: these
+        # are infrastructure regressions (firewall, TLS, exposed routes) that a rollback will not fix.
+        if: success()
+        # SSH probes are skipped: failed negotiations count towards fail2ban and could ban this runner
+        # before the last steps. test-host.sh checks the SSH policy on the server itself.
+        env:
+          SKIP_SSH: "1"
+        run: bash server-provision/tests/test-external.sh
+
+      - name: Registry logout on the server
+        if: always()
+        run: ssh server "docker logout ghcr.io" || true
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy of \`$SHA\`"
+            echo ""
+            echo "| step | result |"
+            echo "| --- | --- |"
+            echo "| activate | ${{ steps.activate.outcome }} |"
+            echo "| smoke test | ${{ steps.smoke.outcome }} |"
+            echo ""
+            echo '```'
+            ssh server "bash datahub/current/server-provision/release.sh status" 2>&1 | head -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

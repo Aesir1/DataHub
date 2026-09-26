@@ -4,14 +4,14 @@ using Aspire.Hosting.ApplicationModel;
 namespace DataHub.AppHost;
 
 /// <summary>
-/// The Grafana observability stack from DieWikinger (compose.observability.yaml), run by the AppHost:
+/// The Grafana observability stack (compose.observability.yaml), run by the AppHost:
 /// Alloy (OTLP in, Docker logs, health probes) → Tempo / Loki / Prometheus → Grafana, plus cAdvisor
 /// and postgres-exporter. Configuration lives in <c>docker/</c> at the repository root, shared with
 /// <c>compose.observability.yaml</c>. The Aspire dashboard keeps
 /// receiving telemetry too; the services export to both.
 /// </summary>
 /// <remarks>
-/// DieWikinger isolates these containers on an <c>internal: true</c> network. Aspire puts every
+/// DataHub isolates these containers on an <c>internal: true</c> network. Aspire puts every
 /// container on its own network, so that isolation is not reproduced here; the Grafana settings that
 /// stop it from calling the Internet are.
 /// </remarks>
@@ -88,7 +88,7 @@ internal static class Observability
             .WithBindMount(Path.Combine(dir, "tempo", "tempo.yaml"), "/etc/tempo/tempo.yaml", isReadOnly: true)
             .WithVolume("datahub-tempo", "/var/tempo");
 
-        // The GF_* switches below keep Grafana from talking to the Internet (same settings as DieWikinger).
+        // The GF_* switches below keep Grafana from talking to the Internet.
         var grafana = builder.Stack("grafana", "grafana/grafana-oss", "13.0.2")
             .WithLimits(224, 192)
             .WithHttpEndpoint(port: GrafanaPort, targetPort: 3000, name: "http")

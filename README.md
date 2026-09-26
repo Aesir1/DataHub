@@ -120,8 +120,11 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Caddy Local Authority (DataHub)
 
 Then open https://app.datahub.localhost and register, or create users in the admin console
 (http://localhost:8081/admin/). Caddy needs ports 80 (redirect to HTTPS, ACME) and 443; if another
-web server holds 80 locally, stop it or move `HTTP_PORT`. On a server set real domains, `CADDY_TLS=<acme e-mail>`, an empty
-`WEB_EXTRA_CA_CERTS`, and `IMAGE_REPO`/`IMAGE_TAG` of your registry.
+web server holds 80 locally, stop it or move `HTTP_PORT`.
+
+A real server is prepared, deployed and rolled back with [`server-provision/`](server-provision/README.md):
+`provision.sh` hardens a fresh Ubuntu server and generates its `.env`, the `deploy` and `rollback`
+workflows ship releases, and `server-provision/tests/` checks the security features.
 
 ## Solution layout
 

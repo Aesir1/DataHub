@@ -13,6 +13,7 @@
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 		-Server
+		-X-Powered-By
 	}
 }
 
@@ -28,11 +29,12 @@
 	reverse_proxy web:3000
 }
 
-# Keycloak: login, registration and the OIDC endpoints. The admin console is not published; reach it
-# over a tunnel (KEYCLOAK_ADMIN_BIND in .env).
+# Keycloak: login, registration and the OIDC endpoints of the datahub realm. The admin console and
+# the master realm (admin logins, admin tokens) are not published; reach them over a tunnel
+# (KEYCLOAK_ADMIN_BIND in .env). The services talk to Keycloak internally, not through Caddy.
 {$AUTH_DOMAIN} {
 	import common
-	@admin path /admin /admin/*
+	@admin path /admin /admin/* /realms/master /realms/master/*
 	respond @admin 404
 	reverse_proxy keycloak:8080
 }
