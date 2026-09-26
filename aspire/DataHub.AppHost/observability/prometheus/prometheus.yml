@@ -1,0 +1,65 @@
+# Local scrape configuration. No remote_write, no external labels pointing anywhere off-box.
+# DataHub: every target is a container on the Aspire network, addressed by its resource name.
+global:
+  # 60s, not 15s: one core, and a site serving a handful of requests a minute. Four times fewer
+  # samples for resolution nobody reads. Grafana evaluates the alert rules on its own 1m schedule.
+  scrape_interval: 60s
+  evaluation_interval: 60s
+  external_labels:
+    stack: datahub
+
+# Alerting lives in Grafana (provisioned under docker/grafana/provisioning/alerting), so there is
+# no rule_files section and no Alertmanager here.
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Per-container CPU / memory / network / disk for everything in this compose project.
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # PostgreSQL. `pg_up` from this job is the database availability signal.
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  # MinIO publishes Prometheus metrics itself — no exporter needed. The v3 root path returns
+  # every metric family in one scrape: capacity, cluster health, per-bucket usage, S3 API request
+  # counts and TTFB, process CPU/memory/IO. Auth is switched off for the metrics paths
+  # (MINIO_PROMETHEUS_AUTH_TYPE=public) because only this network can reach them.
+  - job_name: minio
+    metrics_path: /minio/metrics/v3
+    scrape_interval: 60s
+    static_configs:
+      - targets: ["minio:9000"]
+
+  # RabbitMQ: rabbitmq_prometheus is enabled in the official image. Aggregated metrics only.
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  # Keycloak: KC_METRICS_ENABLED=true serves /metrics on the management port.
+  - job_name: keycloak
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["keycloak:9000"]
+
+  # The observability stack watches itself: `up` per job is what the status panels read.
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+
+  - job_name: tempo
+    static_configs:
+      - targets: ["tempo:3200"]
+
+  - job_name: alloy
+    static_configs:
+      - targets: ["alloy:12345"]

@@ -1,0 +1,274 @@
+// Grafana Alloy — the single collection agent for the stack. Alloy is Grafana's distribution of
+// the OpenTelemetry Collector: every otelcol.* block below is the upstream collector component of
+// the same name. Using it instead of a plain otelcol container avoids running a second agent just
+// to ship Docker logs, which upstream otelcol cannot label with container names on its own.
+//
+// Started with --disable-reporting, which is Alloy's own anonymous usage report to
+// stats.grafana.org. Nothing else in here points off the box.
+//
+// DataHub: started by the Aspire AppHost (see Observability.cs). The .NET services and the Next.js
+// front end send OTLP here *in addition to* the Aspire dashboard. Host processes (api, webhook, web)
+// are reached through the URLs the AppHost injects (Aspire's container-to-host tunnel).
+
+logging {
+  level  = "warn"
+  format = "logfmt"
+}
+
+// =================================================================================================
+// Application telemetry: OTLP in, three backends out.
+// =================================================================================================
+
+otelcol.receiver.otlp "app" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces  = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    metrics = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    traces  = [otelcol.exporter.otlp.tempo.input]
+    logs    = [otelcol.exporter.otlphttp.loki.input]
+    metrics = [otelcol.exporter.prometheus.default.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// Loki 3.x accepts OTLP natively at /otlp. Going through it (rather than the Loki push API) is
+// what carries trace_id and span_id through as structured metadata.
+otelcol.exporter.otlphttp "loki" {
+  client {
+    endpoint = "http://loki:3100/otlp"
+  }
+}
+
+otelcol.exporter.prometheus "default" {
+  forward_to = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+// =================================================================================================
+// Container logs: every container the AppHost labels com.docker.compose.project=datahub. The
+// applications are host processes, not containers; their structured, trace-correlated logs arrive
+// over OTLP above.
+// =================================================================================================
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "datahub"
+    action        = "keep"
+  }
+
+  // One label per compose service — bounded set, safe as a Loki stream label.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service_name"
+  }
+
+  // Docker reports the name with a leading slash.
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "docker"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.containers.output
+  forward_to       = [loki.process.drop_known_noise.receiver]
+  refresh_interval = "15s"
+}
+
+loki.process "drop_known_noise" {
+  forward_to = [loki.write.local.receiver]
+
+  // Tempo's backend worker long-polls its scheduler for compaction jobs. When there is nothing to
+  // compact — the normal state for a single small tenant — the scheduler answers "no jobs found"
+  // and Tempo logs that at error level, forever. Keeping it would bury every real error on the
+  // Logs dashboard. Only this exact sentence is dropped, so a genuine scheduler failure still
+  // arrives.
+  stage.drop {
+    expression          = ".*no jobs found.*"
+    drop_counter_reason = "tempo_scheduler_idle"
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// =================================================================================================
+// Health probes. "Is the application up" answered by an actual HTTP request to its health
+// endpoint, which is a stronger claim than "the container is running".
+// =================================================================================================
+
+prometheus.exporter.blackbox "probes" {
+  // http_2xx_devcert: webhook and web serve the local ASP.NET Core dev certificate, which this
+  // container does not trust. Loopback-only development traffic, so certificate checks are skipped.
+  config = "{ modules: { http_2xx: { prober: http, timeout: 5s, http: { valid_status_codes: [200], preferred_ip_protocol: \"ip4\" } }, http_2xx_devcert: { prober: http, timeout: 5s, http: { valid_status_codes: [200], preferred_ip_protocol: \"ip4\", tls_config: { insecure_skip_verify: true } } } } }"
+
+  target {
+    name    = "api"
+    address = sys.env("PROBE_API")
+    module  = "http_2xx"
+  }
+
+  target {
+    name    = "webhook"
+    address = sys.env("PROBE_WEBHOOK")
+    module  = "http_2xx_devcert"
+  }
+
+  target {
+    name    = "web"
+    address = sys.env("PROBE_WEB")
+    module  = "http_2xx_devcert"
+  }
+
+  target {
+    name    = "keycloak"
+    address = "http://keycloak:9000/health/ready"
+    module  = "http_2xx"
+  }
+
+  target {
+    name    = "minio"
+    address = "http://minio:9000/minio/health/live"
+    module  = "http_2xx"
+  }
+
+  target {
+    name    = "grafana"
+    address = "http://grafana:3000/api/health"
+    module  = "http_2xx"
+  }
+
+  target {
+    name    = "loki"
+    address = "http://loki:3100/ready"
+    module  = "http_2xx"
+  }
+
+  target {
+    name    = "tempo"
+    address = "http://tempo:3200/ready"
+    module  = "http_2xx"
+  }
+}
+
+// The blackbox component labels every target job="integrations/blackbox/<name>". Flatten that to
+// job="blackbox", instance="<name>", which is what the dashboards and alert rules match on.
+discovery.relabel "probes" {
+  targets = prometheus.exporter.blackbox.probes.targets
+
+  rule {
+    source_labels = ["job"]
+    regex         = "integrations/blackbox/(.*)"
+    target_label  = "instance"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "blackbox"
+  }
+}
+
+prometheus.scrape "probes" {
+  targets         = discovery.relabel.probes.output
+  forward_to      = [prometheus.remote_write.local.receiver]
+  scrape_interval = "30s"
+  job_name        = "blackbox"
+}
+
+// =================================================================================================
+// Host filesystem usage. cAdvisor used to answer "how full is the disk", but only as a side
+// effect of accounting every container's disk usage with a recursive du — which saturated a
+// one-core host. The unix exporter answers the same question with statfs on the mount points,
+// which costs nothing, so only the filesystem collector is enabled here.
+// =================================================================================================
+
+prometheus.exporter.unix "host" {
+  rootfs_path      = "/host/root"
+  set_collectors   = ["filesystem"]
+
+  filesystem {
+    // Matched against the mount point with rootfs_path already stripped off, which is why these
+    // read as host paths. Pseudo filesystems, and the container layers under /var/lib/docker:
+    // those all report the same underlying device and would multiply the disk-usage figure.
+    //
+    // overlay in the type list is load-bearing, not tidiness: Alloy's own container root is also
+    // "/" once the prefix is stripped, so without dropping overlay the "/" series could be this
+    // container's rootfs instead of the host disk the alert is about.
+    //
+    // /etc/hostname, /etc/hosts and /etc/resolv.conf are this container's own bind mounts. They
+    // sit on the same device as / and would count a second and third time in any sum().
+    mount_points_exclude = "^/(dev|proc|sys|run|var/lib/docker/.+|etc/(hostname|hosts|resolv\\.conf))($|/)"
+    fs_types_exclude     = "^(autofs|binfmt_misc|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|nsfs|overlay|proc|pstore|securityfs|selinuxfs|squashfs|sysfs|tracefs|tmpfs)$"
+    mount_timeout        = "5s"
+  }
+}
+
+// The exporter labels its targets job="integrations/unix". Flatten to job="node", the name the
+// dashboards and the disk-usage alert match on.
+discovery.relabel "host" {
+  targets = prometheus.exporter.unix.host.targets
+
+  rule {
+    target_label = "job"
+    replacement  = "node"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "datahub-dev"
+  }
+}
+
+prometheus.scrape "host" {
+  targets         = discovery.relabel.host.output
+  forward_to      = [prometheus.remote_write.local.receiver]
+  // 60s here while the probes above stay at 30s, deliberately: filesystem capacity moves slowly,
+  // but a probe interval is how long an outage stays invisible. Do not "fix" the asymmetry.
+  scrape_interval = "60s"
+  job_name        = "node"
+}

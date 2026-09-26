@@ -1,0 +1,1 @@
+# Grafana reads every provisioning subdirectory; without this one it logs an error on every start.

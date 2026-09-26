@@ -1,0 +1,58 @@
+# Single-binary Loki on the local filesystem. No object store, no ring outside this process.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-04-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Structured metadata is how trace_id / span_id ride along without becoming stream labels.
+  allow_structured_metadata: true
+  volume_enabled: true
+  # Server logs can carry personal data (IP addresses in TLS handshake errors, for instance), so
+  # they age out on the short side.
+  retention_period: 168h # 7 days
+  max_query_series: 5000
+
+  otlp_config:
+    resource_attributes:
+      # Loki's default promotes a dozen resource attributes to labels. Only two of them are
+      # genuinely low cardinality here; everything else stays queryable as structured metadata.
+      ignore_defaults: true
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+            - deployment.environment.name
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+# Off. This is the only thing in Loki that would talk to the Internet.
+analytics:
+  reporting_enabled: false

@@ -62,6 +62,24 @@ HTTPS uses the ASP.NET Core dev certificate. The AppHost exports it on start to 
 `aspire/DataHub.AppHost/.certs/` (PFX for Azure Functions Core Tools, PEM for Next.js). Keycloak, MinIO and
 RabbitMQ stay on plain HTTP on localhost.
 
+## Observability
+
+The AppHost also starts the Grafana stack from DieWikinger (`aspire/DataHub.AppHost/Observability.cs`,
+configuration in `aspire/DataHub.AppHost/observability/`):
+
+| Resource | Role |
+| --- | --- |
+| grafana | http://localhost:3001 (`admin` / parameter `grafana-admin-password`); dashboards and alert rules in folder *DataHub* |
+| alloy | OTLP collector on localhost:4317 (gRPC) / 4318 (HTTP); tails container logs; probes api, webhook, web, Keycloak, MinIO |
+| prometheus · loki · tempo | metrics · logs · traces (retention 30 d · 7 d · 2 d) |
+| cadvisor · postgres-exporter | per-container resources · PostgreSQL (`pg_stat_statements` is preloaded) |
+
+The .NET services and the web front end export OTLP twice: to the Aspire dashboard as before, and to Alloy
+(`OTEL_COLLECTOR_ENDPOINT`). Prometheus also scrapes MinIO, RabbitMQ and Keycloak. Every container carries
+`com.docker.compose.project=datahub` / `com.docker.compose.service=<resource>` labels, which is what
+cAdvisor, Alloy, the dashboards and the alert rules select on. Aspire only recreates a persistent container
+when its image or environment changes; bump `Observability.StackRevision` after changing container arguments.
+
 ## Solution layout
 
 ```

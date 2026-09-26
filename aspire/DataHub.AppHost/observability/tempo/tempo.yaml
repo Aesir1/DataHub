@@ -1,0 +1,48 @@
+# Tempo 3.x, monolithic mode (-target=all, the default), which needs no Kafka.
+#
+# Besides storing traces it runs the metrics generator: it derives RED metrics and a service graph
+# from the spans and remote-writes them to the local Prometheus. That is what makes the
+# "metric -> exemplar -> trace" jump in Grafana work.
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+backend_scheduler:
+  provider:
+    compaction:
+      compaction:
+        # Traces are the bulkiest and least useful-when-old signal in the stack, and on a 20 GB
+        # disk two days is as far back as anybody has ever needed to look.
+        block_retention: 48h # 2 days
+
+backend_worker:
+  backoff:
+    # The worker long-polls the scheduler for compaction work. On a deployment this small there is
+    # almost never any, and Tempo logs that "nothing to do" answer at error level once per backoff
+    # period. Stretching the period from the default 1m to 5m cuts the noise fivefold; the rest is
+    # dropped in docker/alloy/config.alloy. Compaction running up to five minutes late is of no
+    # consequence here.
+    max_period: 5m
+
+# Off: Tempo's anonymous usage report is the only outbound call it would otherwise make.
+usage_report:
+  reporting_enabled: false

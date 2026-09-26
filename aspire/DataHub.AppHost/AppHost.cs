@@ -24,16 +24,21 @@ var devCert = DevCertificate.Export(
     Path.Combine(builder.AppHostDirectory, ".certs"),
     builder.Configuration["Parameters:dev-cert-password"] ?? throw new InvalidOperationException("Parameter dev-cert-password is missing."));
 
+// pg_stat_statements must be preloaded at start-up; postgres-exporter reads query rate and slow queries from it.
 var postgres = builder.AddPostgres("postgres", password: postgresPassword, port: 5432)
     .WithLifetime(ContainerLifetime.Persistent)
     .WithEndpointProxySupport(false)
     .WithDataVolume("datahub-postgres")
-    .WithPgAdmin(p => p.WithLifetime(ContainerLifetime.Persistent).WithHostPort(5050));
+    .WithArgs("-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.max=1000", "-c", "pg_stat_statements.track=top")
+    .WithStackLabels("postgres")
+    .WithPgAdmin(p => p.WithLifetime(ContainerLifetime.Persistent).WithHostPort(5050).WithStackLabels("pgadmin"));
 var appDb = postgres.AddDatabase("app");
 var authDb = postgres.AddDatabase("auth");
 var keycloakDb = postgres.AddDatabase("keycloak-db", databaseName: "keycloak");
 
 var keycloak = builder.AddKeycloak("keycloak", 8080, adminPassword: keycloakAdminPassword)
+    .WithStackLabels("keycloak")
+    .WithEnvironment("KC_METRICS_ENABLED", "true")
     .WithLifetime(ContainerLifetime.Persistent)
     .WithEndpointProxySupport(false)
     .WithoutHttpsCertificate()
@@ -51,6 +56,8 @@ var issuer = ReferenceExpression.Create($"{keycloakHttp}/realms/{realm}");
 
 // minio/minio is no longer published on Docker Hub; Chainguard's build is free and multi-arch.
 var minio = builder.AddMinioContainer("minio", rootPassword: minioPassword, port: 9000)
+    .WithStackLabels("minio")
+    .WithEnvironment("MINIO_PROMETHEUS_AUTH_TYPE", "public")
     .WithImageRegistry("cgr.dev")
     .WithImage("chainguard/minio")
     .WithImageTag("latest")
@@ -60,15 +67,21 @@ var minio = builder.AddMinioContainer("minio", rootPassword: minioPassword, port
     .WithDataVolume("datahub-minio");
 
 var rabbitmq = builder.AddRabbitMQ("rabbitmq", password: rabbitPassword, port: 5672)
+    .WithStackLabels("rabbitmq")
     .WithLifetime(ContainerLifetime.Persistent)
     .WithEndpointProxySupport(false)
     .WithManagementPlugin(port: 15672)
     .WithDataVolume("datahub-rabbitmq");
 
 var storage = builder.AddAzureStorage("storage")
-    .RunAsEmulator(e => e.WithLifetime(ContainerLifetime.Persistent).WithDataVolume("datahub-azurite"));
+    .RunAsEmulator(e => e.WithLifetime(ContainerLifetime.Persistent).WithDataVolume("datahub-azurite").WithStackLabels("azurite"));
+
+// Grafana, Prometheus, Loki, Tempo, Alloy, cAdvisor and postgres-exporter (see Observability.cs). Every .NET
+// service and the web front end also send OTLP to Alloy via OTEL_COLLECTOR_ENDPOINT.
+var observability = builder.AddObservability(postgres, appDb);
 
 var migrate = builder.AddProject<Projects.DataHub_DbUtils>("dbutils-migrate")
+    .WithEnvironment("OTEL_COLLECTOR_ENDPOINT", observability.OtlpHttp)
     .WithArgs("migrate", "--context", "All")
     .WithReference(appDb)
     .WithReference(authDb)
@@ -78,6 +91,7 @@ var migrate = builder.AddProject<Projects.DataHub_DbUtils>("dbutils-migrate")
 
 // Destructive: drops and reseeds App, Auth and the Keycloak dev users. Start it from the dashboard.
 builder.AddProject<Projects.DataHub_DbUtils>("dbutils-seed")
+    .WithEnvironment("OTEL_COLLECTOR_ENDPOINT", observability.OtlpHttp)
     .WithArgs("reseed")
     .WithReference(appDb)
     .WithReference(authDb)
@@ -92,6 +106,7 @@ builder.AddProject<Projects.DataHub_DbUtils>("dbutils-seed")
     .WaitFor(keycloak);
 
 var api = builder.AddProject<Projects.DataHub_Api>("api", launchProfileName: "https")
+    .WithEnvironment("OTEL_COLLECTOR_ENDPOINT", observability.OtlpHttp)
     .WithReference(appDb)
     .WithReference(authDb)
     .WithReference(keycloak)
@@ -106,7 +121,8 @@ var api = builder.AddProject<Projects.DataHub_Api>("api", launchProfileName: "ht
 // Waits for the Api so the queue is declared and bound before the first webhook is published.
 // --useHttps is also in the launch profile (Aspire reads it for the endpoint scheme), but Rider's Aspire plugin
 // starts `func host start` without the profile's arguments, so it is passed here too; func accepts it twice.
-builder.AddAzureFunctionsProject<Projects.DataHub_Webhook>("webhook")
+var webhook = builder.AddAzureFunctionsProject<Projects.DataHub_Webhook>("webhook")
+    .WithEnvironment("OTEL_COLLECTOR_ENDPOINT", observability.OtlpHttp)
     .WithHostStorage(storage)
     .WithReference(rabbitmq)
     .WithReference(minio)
@@ -128,7 +144,8 @@ var repoRoot = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..
 
 // Next.js serves HTTPS with the dev certificate. --experimental-https-ca is required too: without it Next drops
 // NODE_EXTRA_CA_CERTS when it forks its server process, and the BFF could not call the Api over HTTPS.
-builder.AddNextJsApp("web", "../../web")
+var web = builder.AddNextJsApp("web", "../../web")
+    .WithEnvironment("OTEL_COLLECTOR_ENDPOINT", observability.OtlpHttp)
     .WithBun()
     .WithEndpoint("http", e =>
     {
@@ -164,6 +181,11 @@ builder.AddNextJsApp("web", "../../web")
         new CommandOptions { IconName = "ArrowSync", Description = "Export the Api schema and run bun run codegen" })
     .WaitFor(api)
     .WaitFor(keycloak);
+
+observability
+    .Probe("api", api, "http", "/health")
+    .Probe("webhook", webhook, "https", "/api/health")
+    .Probe("web", web, "http", "/");
 
 await builder.Build().RunAsync();
 

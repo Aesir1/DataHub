@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: DataHub
+    orgId: 1
+    folder: DataHub
+    type: file
+    disableDeletion: false
+    # Editing a provisioned dashboard in the UI is allowed, but the file wins on the next reload.
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

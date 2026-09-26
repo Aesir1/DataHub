@@ -1,8 +1,17 @@
-import { registerOTel } from "@vercel/otel";
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
 
 export async function register() {
-  // NF-4: traces/metrics to the Aspire dashboard (OTEL_EXPORTER_OTLP_* are injected by the AppHost).
-  registerOTel({ serviceName: "web" });
+  // NF-4: traces to the Aspire dashboard ("auto": OTEL_EXPORTER_OTLP_* injected by the AppHost) and, when
+  // OTEL_COLLECTOR_ENDPOINT is set, also to Alloy for the Grafana stack.
+  const collector = process.env.OTEL_COLLECTOR_ENDPOINT?.replace(/\/$/, "");
+  registerOTel({
+    serviceName: "web",
+    attributes: { "service.namespace": "datahub" },
+    spanProcessors: collector
+      ? ["auto", new BatchSpanProcessor(new OTLPHttpProtoTraceExporter({ url: `${collector}/v1/traces` }))]
+      : ["auto"],
+  });
 
   if (process.env.NEXT_RUNTIME === "nodejs") {
     // FE-10/FE-14: an invalid branding file fails startup; weak contrast only warns.

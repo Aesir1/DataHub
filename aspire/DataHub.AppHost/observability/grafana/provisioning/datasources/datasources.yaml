@@ -1,0 +1,69 @@
+apiVersion: 1
+
+# Three local data sources, wired to each other so a panel can be followed all the way down:
+#   metric -> exemplar -> trace -> span -> logs for that trace, and back.
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      # Must match the scrape interval, which is 60s. Grafana derives
+      # $__rate_interval = max($__interval + timeInterval, 4 x timeInterval) from this, so 15s here
+      # pins it to 60s — and a rate() over a 60s window holding a single 60s-spaced sample returns
+      # nothing at all. That blanked every scraped-metric rate panel at default zoom. At 60s the
+      # floor becomes 240s, which holds four samples.
+      timeInterval: 60s
+      # Exemplars come from the application's own OTLP metrics via Alloy. Tempo's metrics
+      # generator, which used to be the source, was removed on this branch.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+          urlDisplayLabel: View trace
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      maxLines: 2000
+      # trace_id arrives as structured metadata on every application log line, so the log row
+      # renders a button that opens the trace in Tempo.
+      derivedFields:
+        - name: TraceID
+          matcherType: label
+          matcherRegex: trace_id
+          url: "${__value.raw}"
+          datasourceUid: tempo
+          urlDisplayLabel: View trace
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      streamingEnabled:
+        search: true
+      # Trace -> logs. Matches the Loki stream by service name and narrows to the trace id.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        filterByTraceID: true
+        filterBySpanID: false
+        tags:
+          - key: service.name
+            value: service_name
+      search:
+        hide: false
+      lokiSearch:
+        datasourceUid: loki
+      traceQuery:
+        timeShiftEnabled: true
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m

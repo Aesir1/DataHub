@@ -1,0 +1,1153 @@
+# Grafana unified alerting, provisioned from this file. Nothing here reaches outside the host:
+# every query runs against the local Prometheus and no contact point is configured, so an alert
+# shows up in Grafana > Alerting and nowhere else. Add a contact point yourself if you want one.
+#
+# ---------------------------------------------------------------------------------------------
+# Thresholds. Each is the `params` value of the rule's THRESHOLD expression; edit the number and
+# restart the grafana resource from the Aspire dashboard.
+#
+#   application  error rate            5   %   of requests answering 5xx
+#                p95 latency           2   s
+#                CPU                  85   %   of one core
+#                memory               80   %   of host RAM
+#                exceptions            1   /s
+#   postgresql   connections high     75   %   of max_connections
+#                connections critical 90   %   of max_connections
+#                database size        10   GiB
+#                mean query time       0.5 s
+#                deadlocks             0   in 10 minutes
+#   minio        storage              85   %   of usable capacity
+#                error rate            5   %   of S3 requests
+#                p95 time to first byte 2  s
+#   docker       restarts              2   in 15 minutes
+#                container CPU        85   %   of one core
+#                container memory     80   %   of host RAM
+#                host disk            85   %   full
+# ---------------------------------------------------------------------------------------------
+apiVersion: 1
+groups:
+- orgId: 1
+  name: application
+  folder: DataHub
+  interval: 1m
+  rules:
+  - uid: dh-app-down
+    title: Application unavailable
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: min(probe_success{job="blackbox",instance=~"api|webhook|web"})
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 2m
+    annotations:
+      summary: The api, webhook or web front end does not answer its health probe.
+      description: Alloy probes /health (api), /api/health (webhook) and / (web) every 30s. Check the resource logs in the
+        Aspire dashboard and the DataHub .NET services dashboard.
+    labels:
+      severity: critical
+      stack: datahub
+    isPaused: false
+  - uid: dh-app-error-rate
+    title: High application error rate
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: sum(rate(http_server_request_duration_seconds_count{job=~"datahub/.+",http_response_status_code=~"5.."}[5m]))
+          / clamp_min(sum(rate(http_server_request_duration_seconds_count{job=~"datahub/.+"}[5m])), 0.001) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: More than 5% of requests are answering 5xx.
+      description: Open the DataHub .NET services dashboard, then follow an exemplar into the trace and its logs.
+    labels:
+      severity: critical
+      stack: datahub
+    isPaused: false
+  - uid: dh-app-latency
+    title: High application p95 latency
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{job=~"datahub/.+"}[5m])))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 2
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: 95th percentile request duration is above 2s.
+      description: Check the latency panel for the route, then open a slow trace to see whether the time is in the database,
+        in S3 or in the application itself.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-app-cpu
+    title: High application CPU
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: max(rate(dotnet_process_cpu_time_seconds_total{job=~"datahub/.+"}[5m]))
+          * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 85
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: A DataHub .NET service is using more than 85% of one CPU.
+      description: Compare with request rate. Sustained high CPU at low traffic usually means a hot loop or GC pressure.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-app-memory
+    title: High application memory
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: max(dotnet_process_memory_working_set_bytes{job=~"datahub/.+"})
+          / clamp_min(max(machine_memory_bytes), 1) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 80
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: A DataHub .NET service holds more than 80% of the host's memory.
+      description: Check the GC panel on the DataHub .NET services dashboard for a heap that never comes back down.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-app-exceptions
+    title: Excessive exceptions
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: sum(rate(dotnet_exceptions_total{job=~"datahub/.+"}[5m]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: The application is throwing more than one exception per second.
+      description: Exceptions are counted even when handled. Filter the Logs dashboard to level=error for the reason.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+- orgId: 1
+  name: postgresql
+  folder: DataHub
+  interval: 1m
+  rules:
+  - uid: dh-pg-down
+    title: PostgreSQL unavailable
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: pg_up
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 2m
+    annotations:
+      summary: postgres_exporter cannot reach the database.
+      description: Check the postgres logs in the Aspire dashboard. Api, DbUtils and Keycloak cannot work without it.
+    labels:
+      severity: critical
+      stack: datahub
+    isPaused: false
+  - uid: dh-pg-connections-high
+    title: High PostgreSQL connection usage
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: sum(pg_stat_activity_count) / clamp_min(max(pg_settings_max_connections), 1) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 75
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: More than 75% of max_connections are in use.
+      description: Look at the connections-by-state panel. A pile of 'idle in transaction' backends is a leaked DbContext,
+        not real load.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-pg-connections-exhausted
+    title: PostgreSQL connections nearly exhausted
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: sum(pg_stat_activity_count) / clamp_min(max(pg_settings_max_connections), 1) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 90
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 2m
+    annotations:
+      summary: "More than 90% of max_connections are in use \u2014 new connections are about to be refused."
+      description: Same checks as the warning, but now. superuser_reserved_connections is the only headroom left.
+    labels:
+      severity: critical
+      stack: datahub
+    isPaused: false
+  - uid: dh-pg-size
+    title: PostgreSQL database large
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: max(pg_database_size_bytes) / 1024 / 1024 / 1024
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 10
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 30m
+    annotations:
+      summary: The database is larger than 10 GiB.
+      description: Not a failure by itself; it is the early warning for the host filling up. Check table sizes.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-pg-query-latency
+    title: High PostgreSQL query latency
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: sum(rate(pg_stat_statements_seconds_total[5m])) / clamp_min(sum(rate(pg_stat_statements_calls_total[5m])), 0.0001)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: The mean statement takes longer than 500ms.
+      description: The slowest-queries table on the PostgreSQL dashboard lists the query ids. Resolve one with SELECT query
+        FROM pg_stat_statements WHERE queryid = <id>;
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-pg-deadlocks
+    title: PostgreSQL deadlocks
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: sum(increase(pg_stat_database_deadlocks[10m]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 0m
+    annotations:
+      summary: PostgreSQL resolved a deadlock in the last 10 minutes.
+      description: One deadlock means two transactions took the same locks in a different order. The database log (Logs dashboard,
+        service db) names both statements.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+- orgId: 1
+  name: minio
+  folder: DataHub
+  interval: 1m
+  rules:
+  - uid: dh-minio-down
+    title: MinIO unavailable
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: probe_success{job="blackbox",instance="minio"}
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 2m
+    annotations:
+      summary: MinIO does not answer /minio/health/live.
+      description: Webhook payload storage and document uploads are down. Check the minio logs in the Aspire dashboard.
+    labels:
+      severity: critical
+      stack: datahub
+    isPaused: false
+  - uid: dh-minio-storage
+    title: MinIO storage almost full
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: (minio_cluster_health_capacity_usable_total_bytes - minio_cluster_health_capacity_usable_free_bytes) / clamp_min(minio_cluster_health_capacity_usable_total_bytes,
+          1) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 85
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 15m
+    annotations:
+      summary: MinIO has used more than 85% of its usable capacity.
+      description: Usable capacity is the host filesystem behind the miniodata volume.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-minio-errors
+    title: High MinIO error rate
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: sum(rate(minio_api_requests_errors_total[5m])) / clamp_min(sum(rate(minio_api_requests_total[5m])), 0.001) *
+          100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: More than 5% of S3 requests are failing.
+      description: 4xx usually means a credential or policy problem; 5xx means MinIO itself. Split them on the MinIO dashboard.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-minio-latency
+    title: High MinIO request latency
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: histogram_quantile(0.95, sum by (le) (rate(minio_api_requests_ttfb_seconds_distribution[5m])))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 2
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    annotations:
+      summary: 95th percentile time to first byte is above 2s.
+      description: Check drive latency and host disk I/O on the MinIO dashboard.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+- orgId: 1
+  name: docker
+  folder: DataHub
+  interval: 1m
+  rules:
+  - uid: dh-container-restarting
+    title: Container restarting repeatedly
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: max by (container_label_com_docker_compose_service) (changes(container_start_time_seconds{container_label_com_docker_compose_project="datahub"}[15m]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 2
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 0m
+    annotations:
+      summary: A container has restarted more than twice in 15 minutes.
+      description: A crash loop. the resource logs in the Aspire dashboard have the reason; the Logs dashboard keeps the history
+        after the container is gone.
+    labels:
+      severity: critical
+      stack: datahub
+    isPaused: false
+  - uid: dh-container-cpu
+    title: Container using high CPU
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: max by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_project="datahub"}[5m]))
+          * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 85
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 15m
+    annotations:
+      summary: A container has been above 85% of one CPU for 15 minutes.
+      description: The table on the Containers dashboard names it.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-container-memory
+    title: Container using high memory
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: max by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_project="datahub"})
+          / clamp_min(max(machine_memory_bytes), 1) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 80
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 15m
+    annotations:
+      summary: A container holds more than 80% of the host's memory.
+      description: The table on the Containers dashboard names it.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
+  - uid: dh-disk-full
+    title: Host disk almost full
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: (1 - node_filesystem_avail_bytes{job="node", mountpoint="/", fstype!~"overlay|tmpfs"} / clamp_min(node_filesystem_size_bytes{job="node", mountpoint="/", fstype!~"overlay|tmpfs"}, 1)) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 85
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 15m
+    annotations:
+      summary: The filesystem holding the Docker volumes is more than 85% full.
+      description: Postgres, MinIO, Prometheus, Loki and Tempo all write here. `docker system df -v` shows which volume grew.
+    labels:
+      severity: critical
+      stack: datahub
+    isPaused: false
+  - uid: dh-target-down
+    title: Monitoring target down
+    condition: THRESHOLD
+    data:
+    - refId: QUERY
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        editorMode: code
+        expr: count(up == 0)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        refId: QUERY
+    - refId: THRESHOLD
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - QUERY
+          reducer:
+            params: []
+            type: last
+          type: query
+        datasource:
+          type: __expr__
+          uid: __expr__
+        expression: QUERY
+        refId: THRESHOLD
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: A Prometheus scrape target is not answering.
+      description: Part of the stack is blind. Prometheus > Status > Target health lists which one.
+    labels:
+      severity: warning
+      stack: datahub
+    isPaused: false
