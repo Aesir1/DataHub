@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.Minio" />
+    <PackageReference Include="Testcontainers.RabbitMq" />
+    <PackageReference Include="Respawn" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <ProjectReference Include="..\..\src\DataHub.Infrastructure\DataHub.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="NSubstitute" />
+    <!-- All classes share one database and reset it between tests. -->
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

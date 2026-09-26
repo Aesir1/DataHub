@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <ProjectReference Include="..\..\src\DataHub.DbUtils\DataHub.DbUtils.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="NSubstitute" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,14 @@
+{
+  "roles": [
+    {
+      "id": "0199a000-0000-7000-9000-000000000001",
+      "name": "user",
+      "permissions": ["containers.read", "products.read", "products.write", "documents.read", "documents.write"]
+    },
+    {
+      "id": "0199a000-0000-7000-9000-000000000002",
+      "name": "platform-admin",
+      "permissions": ["containers.read", "products.read", "products.write", "documents.read", "documents.write", "queues.manage"]
+    }
+  ]
+}
