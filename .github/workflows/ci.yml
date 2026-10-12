@@ -82,6 +82,7 @@ jobs:
       - name: DB-6 migrations match the model
         run: |
           dotnet tool restore
+          dotnet restore src/DataHub.DbUtils
           dotnet ef migrations has-pending-model-changes --context AppDbContext --project src/DataHub.Infrastructure --startup-project src/DataHub.DbUtils
           dotnet ef migrations has-pending-model-changes --context AuthDbContext --project src/DataHub.Auth --startup-project src/DataHub.DbUtils
 
