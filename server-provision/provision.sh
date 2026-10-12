@@ -219,13 +219,12 @@ ok "su restricted to the sudo group"
 cat > /etc/sudoers.d/10-hardening <<CONF
 # $MARK
 Defaults use_pty
-Defaults logfile="/var/log/sudo.log"
 Defaults timestamp_timeout=5
 Defaults passwd_tries=3
 CONF
 chmod 440 /etc/sudoers.d/10-hardening
 visudo -cq || die "sudoers syntax error in /etc/sudoers.d/10-hardening"
-ok "sudo: own pty, logged to /var/log/sudo.log, 5 minute timeout"
+ok "sudo: own pty, 5 minute timeout, logged to the journal"
 
 # ---------------------------------------------------------------------------------------------
 step "Firewall (ufw)"
@@ -514,7 +513,6 @@ cat > /etc/audit/rules.d/60-datahub.rules <<CONF
 -w /etc/sysctl.d/ -p wa -k sysctl
 -w /etc/cron.d/ -p wa -k cron
 -w /var/spool/cron/ -p wa -k cron
--w /var/log/sudo.log -p wa -k sudo-log
 # Kernel modules and clock changes.
 -a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k modules
 -a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change
