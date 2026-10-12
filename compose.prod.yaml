@@ -313,10 +313,14 @@ services:
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 10s
+      # Not rabbitmq-diagnostics ping: that boots a whole Erlang VM per check (~0.7s CPU every
+      # interval, most of this container's CPU). The AMQP listener only opens once boot completes,
+      # so a TCP connect is an equivalent liveness signal at ~zero cost.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5672"]
+      interval: 30s
+      timeout: 5s
       retries: 12
+      start_period: 60s
     networks: [backend, observability]
 
   minio:
