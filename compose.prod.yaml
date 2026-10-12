@@ -307,9 +307,6 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
-      # No scheduler busy-waiting: idle spin burns constant CPU on a small host for microseconds
-      # of latency this stack never notices.
-      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+sbwt none +sbwtdcpu none +sbwtdio none"
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq
     healthcheck:
