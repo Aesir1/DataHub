@@ -31,7 +31,7 @@ server-provision/
 | Kernel | sysctl: anti-spoofing, no redirects/source routing, SYN cookies, `kptr_restrict`, `dmesg_restrict`, no unprivileged BPF, ptrace limited, protected links. No core dumps. Unused protocols and filesystems blacklisted. `/dev/shm` noexec |
 | MAC and audit | AppArmor enabled; auditd records changes to accounts, sudo, SSH, firewall, Docker, cron, kernel modules, the clock and every access to the `.env` file |
 | Docker | log caps, `no-new-privileges` for every container, `icc` off on the default bridge, live-restore, loopback default bind |
-| Stack | Only Caddy is reachable (80/443). Api, PostgreSQL, RabbitMQ and MinIO sit on internal networks without a route out; Grafana and the Keycloak admin console listen on 127.0.0.1 and are reached over SSH tunnels. The Keycloak master realm is not published |
+| Stack | Only Caddy is reachable (80/443). Api, RabbitMQ and MinIO sit on internal networks without a route out; Grafana, the Keycloak admin console and PostgreSQL listen on 127.0.0.1 and are reached over SSH tunnels. The Keycloak master realm is not published |
 | Secrets | Generated on the server (`~deploy/datahub/.env`, mode 600, never in git or in GitHub) |
 
 ## Step by step
@@ -150,7 +150,7 @@ SSH_HOST=<server-ip> bash server-provision/tests/test-external.sh
 Then create the first platform admin:
 
 ```bash
-ssh -i ~/.ssh/datahub_admin -L 8081:localhost:8081 -L 3300:localhost:3300 ops@<server-ip>
+ssh -i ~/.ssh/datahub_admin -L 8081:localhost:8081 -L 3300:localhost:3300 -L 5432:localhost:5432 ops@<server-ip>
 sudo grep -E '^(KEYCLOAK|GRAFANA)_ADMIN' ~deploy/datahub/.env
 ```
 
@@ -158,6 +158,13 @@ sudo grep -E '^(KEYCLOAK|GRAFANA)_ADMIN' ~deploy/datahub/.env
   first at `https://<APP_DOMAIN>`) -> Role mapping -> assign `platform-admin`. Then create a permanent
   admin user in the master realm and delete the bootstrap `admin` account.
 - Grafana: http://localhost:3300.
+- PostgreSQL (psql, Rider, DataGrip; databases `app`, `auth`, `keycloak`; credentials
+  `POSTGRES_USER`/`POSTGRES_PASSWORD` in `~deploy/datahub/.env`):
+
+  ```
+  postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@localhost:5432/app
+  jdbc:postgresql://localhost:5432/app?user=<POSTGRES_USER>&password=<POSTGRES_PASSWORD>
+  ```
 
 ### 6. Rollback
 
