@@ -1,7 +1,7 @@
-# Deploys main to the production server once ci has passed for that commit.
+# Deploys main to the production server once ci has passed for that commit. ci already pushed the
+# images to GHCR tagged with the commit SHA (its images job); this workflow only ships and activates.
 #
-#   ci (green on main) -> build + push images to GHCR, tagged with the commit SHA
-#                      -> upload the stack files as ~/datahub/releases/<sha> on the server
+#   ci (green on main) -> upload the stack files as ~/datahub/releases/<sha> on the server
 #                      -> release.sh activate <sha>: pull, up, wait until every service is healthy
 #                      -> smoke test through Caddy, then the external security check
 #   activation fails   -> release.sh restore   (the previous release is started again)
@@ -29,14 +29,11 @@ env:
   SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
+  # Only for manual runs (deploying a branch that ci never pushed images for): build and push the
+  # images for this SHA. The normal workflow_run path skips this job and reuses the images ci's
+  # images job already pushed. Same build block as ci.yml images — keep them in sync.
   images:
-    # workflow_run's branch filter matches the head branch name, which a fork's pull request can also
-    # call "main": deploy only green push runs of this repository.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -78,6 +75,16 @@ jobs:
 
   deploy:
     needs: images
+    # workflow_run path: images job is skipped (ci already pushed this SHA), deploy still runs —
+    # hence !cancelled() instead of the implicit needs gate. workflow_run's branch filter matches
+    # the head branch name, which a fork's pull request can also call "main": deploy only green
+    # push runs of this repository.
+    if: >-
+      !cancelled() && (
+      (github.event_name == 'workflow_dispatch' && needs.images.result == 'success') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-latest
     environment: production
     permissions:
