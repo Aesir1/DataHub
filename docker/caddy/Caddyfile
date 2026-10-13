@@ -34,9 +34,21 @@
 # (KEYCLOAK_ADMIN_BIND in .env). The services talk to Keycloak internally, not through Caddy.
 {$AUTH_DOMAIN} {
 	import common
+	# The tunnelled admin console loads its third-party-cookie check and session iframe from the
+	# master realm's PUBLIC frontend URL; these are static helper pages without auth data, so they
+	# are exempt from the master-realm block below (else the console dies with "Timeout when
+	# waiting for 3rd party check iframe").
+	@consoleIframes path /realms/master/protocol/openid-connect/3p-cookies/* /realms/master/protocol/openid-connect/login-status-iframe.html
+	handle @consoleIframes {
+		reverse_proxy keycloak:8080
+	}
 	@admin path /admin /admin/* /realms/master /realms/master/*
-	respond @admin 404
-	reverse_proxy keycloak:8080
+	handle @admin {
+		respond 404
+	}
+	handle {
+		reverse_proxy keycloak:8080
+	}
 }
 
 # Inbound webhooks (Azure Functions). Only the webhook route and the health probe exist publicly.
