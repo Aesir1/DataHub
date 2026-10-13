@@ -302,7 +302,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
-    networks: [backend, observability]
+    networks: [backend, observability, tunnel]
 
   rabbitmq:
     image: rabbitmq:4.3-management
