@@ -218,6 +218,8 @@ services:
       Seed__KeycloakAdminUser: ${KEYCLOAK_ADMIN_USER:-admin}
       Seed__KeycloakAdminPassword: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
       Seed__LoginTheme: datahub
+      # Keeps the admin console's login redirect on the tunnel (see SeedOptions.MasterRealmFrontendUrl).
+      Seed__MasterRealmFrontendUrl: ${KEYCLOAK_ADMIN_URL:-http://localhost:8081}
     networks: [backend, observability]
 
   # ---------------------------------------------------------------------------------------------

@@ -25,6 +25,13 @@ public sealed class SeedOptions
 
     /// <summary>Keycloak login theme to set on the realm; empty keeps the current one.</summary>
     public string? LoginTheme { get; set; }
+
+    /// <summary>
+    /// Master realm frontendUrl, the tunnelled admin URL (e.g. http://localhost:8081). Keycloak builds the
+    /// admin console's login redirect from the frontend hostname rather than KC_HOSTNAME_ADMIN
+    /// (keycloak#42254), and the public domain blocks /realms/master. Empty keeps the current one.
+    /// </summary>
+    public string? MasterRealmFrontendUrl { get; set; }
 }
 
 /// <summary>
@@ -70,7 +77,30 @@ internal sealed class KeycloakUsers(HttpClient http, SeedOptions options, ILogge
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
         await EnsureRealmThemeAsync(ct);
+        await EnsureMasterFrontendUrlAsync(ct);
         return await EnsureDefaultRoleAsync(Roles.User, ct) ? 1 : 0;
+    }
+
+    /// <summary>Pins the master realm's frontendUrl to the tunnelled admin URL so the console login stays off the public domain.</summary>
+    private async Task EnsureMasterFrontendUrlAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(options.MasterRealmFrontendUrl))
+        {
+            return;
+        }
+
+        var realm = (await http.GetFromJsonAsync<JsonObject>("admin/realms/master", ct))!;
+        var attributes = realm["attributes"] as JsonObject ?? [];
+        if (attributes["frontendUrl"]?.GetValue<string>() == options.MasterRealmFrontendUrl)
+        {
+            return;
+        }
+
+        attributes["frontendUrl"] = options.MasterRealmFrontendUrl;
+        realm["attributes"] = attributes;
+        using var update = await http.PutAsJsonAsync("admin/realms/master", realm, ct);
+        update.EnsureSuccessStatusCode();
+        logger.LogInformation("Set master realm frontendUrl to {Url}", options.MasterRealmFrontendUrl);
     }
 
     /// <summary>

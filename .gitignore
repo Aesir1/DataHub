@@ -12,3 +12,4 @@ web/schema-settings.json
 aspire/DataHub.AppHost/.certs/
 .env
 .idea
+SqlScripts
