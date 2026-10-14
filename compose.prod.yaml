@@ -26,6 +26,10 @@ x-otel: &otel
   OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: cumulative
   # 15 s so rate() over Grafana's 60 s $__rate_interval always holds more than one sample.
   OTEL_METRIC_EXPORT_INTERVAL: "15000"
+  # Sample 10% of traces at the root; children follow the parent's decision. At full sampling a
+  # load test (or real traffic at that level) OOMs the memory-capped alloy/tempo containers.
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${DEPLOYMENT_ENVIRONMENT:-production}
 
 services:

@@ -29,6 +29,19 @@ otelcol.receiver.otlp "app" {
   }
 
   output {
+    traces  = [otelcol.processor.memory_limiter.default.input]
+    logs    = [otelcol.processor.memory_limiter.default.input]
+    metrics = [otelcol.processor.memory_limiter.default.input]
+  }
+}
+
+// First in the pipeline, before batching: when ingest bursts (load tests) approach the container's
+// GOMEMLIMIT (192MiB), refuse data and force GC instead of OOM-dying and losing everything buffered.
+otelcol.processor.memory_limiter "default" {
+  check_interval = "1s"
+  limit          = "150MiB"
+
+  output {
     traces  = [otelcol.processor.batch.default.input]
     logs    = [otelcol.processor.batch.default.input]
     metrics = [otelcol.processor.batch.default.input]
