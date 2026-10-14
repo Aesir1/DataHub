@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-TYPE=${1:-smoke}
+TYPE=${1:-smoke}  # smoke|load|stress|soak|breakpoint
 TARGET=${2:-compose}
 shift $(( $# > 1 ? 2 : $# ))
 

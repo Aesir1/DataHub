@@ -58,6 +58,21 @@ const SCENARIOS = {
     ],
   },
   soak: { executor: 'constant-vus', vus: 10, duration: '30m' },
+  // Webhook-only, no think time: ramp the arrival rate until the webhook breaks.
+  // The run aborts once >5% of webhook requests fail (see THRESHOLDS).
+  breakpoint: {
+    executor: 'ramping-arrival-rate',
+    startRate: 50,
+    timeUnit: '1s',
+    preAllocatedVUs: 500,
+    maxVUs: 2000,
+    stages: [
+      { duration: '1m', target: 200 },
+      { duration: '2m', target: 600 },
+      { duration: '2m', target: 1200 },
+      { duration: '2m', target: 2000 },
+    ],
+  },
 };
 
 const THRESHOLDS = {
@@ -66,6 +81,9 @@ const THRESHOLDS = {
   // Stress exists to find the ceiling, so its thresholds are informational only.
   stress: { http_req_failed: ['rate<0.5'] },
   soak: { http_req_failed: ['rate<0.01'], 'http_req_duration{flow:webhook}': ['p(95)<1000'] },
+  breakpoint: {
+    'http_req_failed{flow:webhook}': [{ threshold: 'rate<0.05', abortOnFail: true, delayAbortEval: '30s' }],
+  },
 };
 if (WEB_FLOW) {
   // GraphQL pages over the 5M/15M tables get their own budget; login is one-off per VU.
@@ -75,7 +93,7 @@ if (WEB_FLOW) {
 }
 
 if (!SCENARIOS[TYPE]) {
-  throw new Error(`Unknown TEST_TYPE "${TYPE}" — use smoke|load|stress|soak`);
+  throw new Error(`Unknown TEST_TYPE "${TYPE}" — use smoke|load|stress|soak|breakpoint`);
 }
 
 export const options = {
@@ -148,8 +166,9 @@ function health() {
 let authed = false;
 let containerIds = [];
 
+// Mirrors ContainerBrowser.tsx — no totalCount (COUNT(*) over 5M rows per request).
 const CONTAINERS_QUERY = `query Containers($after: String) {
-  containers(first: 100, after: $after) { totalCount pageInfo { hasNextPage endCursor } nodes { id code } }
+  containers(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id code } }
 }`;
 const TEMPERATURES_QUERY = `query Temperatures($containerId: UUID!, $after: String) {
   temperatures(containerId: $containerId, first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id timestampUtc celsius } }
@@ -217,6 +236,10 @@ function webBrowse() {
 }
 
 export function main() {
+  if (TYPE === 'breakpoint') {
+    webhookPost(); // pure webhook ceiling hunt, no mix, no think time
+    return;
+  }
   const roll = Math.random();
   if (WEB_FLOW && roll < 0.2) webBrowse();
   else if (roll < 0.9) webhookPost();
