@@ -1,11 +1,12 @@
 import { auth } from "@/auth";
+import type { Session } from "next-auth";
 
 /**
  * Document bytes go browser → here → Api → S3 (and back); S3 itself is never reachable from outside.
  * Bodies are streamed, not buffered. The Api checks ownership, content type and the 25 MB limit.
+ * Handlers are wrapped in auth() so a refreshed session cookie reaches the browser (see the graphql route).
  */
-async function forward(req: Request, id: string): Promise<Response> {
-  const session = await auth();
+async function forward(session: Session | null, req: Request, id: string): Promise<Response> {
   if (!session?.accessToken || session.error) {
     return new Response("Not authenticated", { status: 401 });
   }
@@ -36,12 +37,10 @@ function copy(from: Headers): Headers {
   return to;
 }
 
-type Context = { params: Promise<{ id: string }> };
+export const GET = auth(async (req, { params }) => {
+  return forward(req.auth, req, ((await params) as { id: string }).id);
+});
 
-export async function GET(req: Request, { params }: Context) {
-  return forward(req, (await params).id);
-}
-
-export async function PUT(req: Request, { params }: Context) {
-  return forward(req, (await params).id);
-}
+export const PUT = auth(async (req, { params }) => {
+  return forward(req.auth, req, ((await params) as { id: string }).id);
+});

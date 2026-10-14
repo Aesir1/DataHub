@@ -7,12 +7,19 @@
 
 import http from 'k6/http';
 import crypto from 'k6/crypto';
+import exec from 'k6/execution';
 import { check, sleep } from 'k6';
 import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.2/index.js';
 
 const BASE = (__ENV.BASE_URL || 'https://localhost:7071').replace(/\/+$/, '');
 const TYPE = __ENV.TEST_TYPE || 'smoke';
 const SECRET = __ENV.HMAC_SECRET || '';
+// Signed-in web-user flow (Auth.js + Keycloak OIDC, then GraphQL through the BFF).
+// Activates when WEB_URL + LOGIN_EMAIL + LOGIN_PASSWORD are set.
+const WEB = (__ENV.WEB_URL || '').replace(/\/+$/, '');
+const EMAIL = __ENV.LOGIN_EMAIL || '';
+const PASS = __ENV.LOGIN_PASSWORD || '';
+const WEB_FLOW = Boolean(WEB && EMAIL && PASS);
 // Seeded container code space (SqlScripts/populate-test-data.sql). Readings land on
 // existing rows at prod scale; on an unseeded DB the consumer creates the container.
 const CONTAINERS = parseInt(__ENV.CONTAINERS || '5000000', 10);
@@ -60,6 +67,12 @@ const THRESHOLDS = {
   stress: { http_req_failed: ['rate<0.5'] },
   soak: { http_req_failed: ['rate<0.01'], 'http_req_duration{flow:webhook}': ['p(95)<1000'] },
 };
+if (WEB_FLOW) {
+  // GraphQL pages over the 5M/15M tables get their own budget; login is one-off per VU.
+  for (const t of ['smoke', 'load', 'soak']) {
+    THRESHOLDS[t]['http_req_duration{flow:web}'] = ['p(95)<3000'];
+  }
+}
 
 if (!SCENARIOS[TYPE]) {
   throw new Error(`Unknown TEST_TYPE "${TYPE}" — use smoke|load|stress|soak`);
@@ -69,6 +82,8 @@ export const options = {
   scenarios: { [TYPE]: { ...SCENARIOS[TYPE], exec: 'main' } },
   thresholds: THRESHOLDS[TYPE],
   insecureSkipTLSVerify: __ENV.SKIP_TLS === '1', // Caddy internal CA / dev cert
+  // k6 wipes the VU cookie jar each iteration by default — the web session must survive.
+  noCookiesReset: true,
 };
 
 const url = (p) => `${BASE}${p}`;
@@ -127,9 +142,84 @@ function health() {
   check(res, { 'health 200': (r) => r.status === 200 }, { flow: 'health' });
 }
 
+// --- Signed-in web user (Auth.js + Keycloak OIDC) ----------------------------------
+// Per-VU: each VU has its own cookie jar and session.
+
+let authed = false;
+let containerIds = [];
+
+const CONTAINERS_QUERY = `query Containers($after: String) {
+  containers(first: 100, after: $after) { totalCount pageInfo { hasNextPage endCursor } nodes { id code } }
+}`;
+const TEMPERATURES_QUERY = `query Temperatures($containerId: UUID!, $after: String) {
+  temperatures(containerId: $containerId, first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id timestampUtc celsius } }
+}`;
+
+function ensureLogin() {
+  if (authed) return true;
+
+  // 1. CSRF token (sets the double-submit cookie).
+  const csrfRes = http.get(`${WEB}/api/auth/csrf`, { tags: { flow: 'login' } });
+  const csrfToken = csrfRes.status === 200 ? csrfRes.json('csrfToken') : null;
+  if (!csrfToken) {
+    check(csrfRes, { 'csrf token': () => false }, { flow: 'login' });
+    return false;
+  }
+
+  // 2. Start the OIDC flow; k6 follows the redirect to the Keycloak login page.
+  const signin = http.post(
+    `${WEB}/api/auth/signin/keycloak`,
+    { csrfToken, callbackUrl: '/app' },
+    { tags: { flow: 'login' } }
+  );
+  const form = signin.html().find('#kc-form-login');
+  const action = form.attr('action');
+  if (!action) {
+    check(signin, { 'keycloak login page': () => false }, { flow: 'login' });
+    exec.test.abort('no Keycloak login form — check WEB_URL and that the web client is configured');
+  }
+
+  // 3. Credentials; Keycloak redirects through /api/auth/callback/keycloak back to /app.
+  const res = http.post(action, { username: EMAIL, password: PASS }, { tags: { flow: 'login' } });
+  // Success = redirected all the way back to the web app (not stuck on a Keycloak page).
+  authed = check(res, { 'login ok': (r) => r.status === 200 && r.url.startsWith(WEB) }, { flow: 'login' });
+  if (!authed) exec.test.abort('login failed — check LOGIN_EMAIL/LOGIN_PASSWORD');
+  return authed;
+}
+
+function graphql(query, variables, name) {
+  const res = http.post(`${WEB}/api/graphql`, JSON.stringify({ query, variables }), {
+    headers: { 'Content-Type': 'application/json' },
+    tags: { flow: 'web', op: name },
+  });
+  const ok = check(
+    res,
+    { [`${name} ok`]: (r) => r.status === 200 && !r.json('errors') && r.json('data') != null },
+    { flow: 'web' }
+  );
+  if (!ok) console.error(`${name} failed: ${res.status} ${String(res.body).slice(0, 300)}`);
+  return ok ? res.json('data') : null;
+}
+
+function webBrowse() {
+  if (!ensureLogin()) return;
+
+  // Containers page: list query, then temperatures of one container — what the browser does.
+  if (containerIds.length === 0 || Math.random() < 0.2) {
+    const data = graphql(CONTAINERS_QUERY, { after: null }, 'containers');
+    const nodes = data && data.containers ? data.containers.nodes : [];
+    if (nodes.length > 0) containerIds = nodes.map((n) => n.id);
+  }
+  if (containerIds.length > 0) {
+    const id = containerIds[Math.floor(Math.random() * containerIds.length)];
+    graphql(TEMPERATURES_QUERY, { containerId: id, after: null }, 'temperatures');
+  }
+}
+
 export function main() {
   const roll = Math.random();
-  if (roll < 0.9) webhookPost();
+  if (WEB_FLOW && roll < 0.2) webBrowse();
+  else if (roll < 0.9) webhookPost();
   else if (roll < 0.95) badSignature();
   else health();
   if (THINK) sleep(0.5 + Math.random() * 1.5);

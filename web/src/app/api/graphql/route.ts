@@ -2,10 +2,12 @@ import { auth } from "@/auth";
 
 /**
  * Backend-for-frontend: the browser posts GraphQL here, the server attaches the Keycloak access token.
- * Route handlers can write cookies, so a token refreshed by auth() is persisted.
+ * Wrapped in auth() because a bare auth() call drops the Set-Cookie of a refreshed session: the next
+ * request then replays the old single-use refresh token and Keycloak revokes the whole SSO session
+ * ("Maximum allowed refresh token reuse exceeded"). The wrapper copies the rotated cookie onto the response.
  */
-export async function POST(req: Request) {
-  const session = await auth();
+export const POST = auth(async (req) => {
+  const session = req.auth;
   if (!session?.accessToken || session.error) {
     return Response.json({ errors: [{ message: "Not authenticated" }] }, { status: 401 });
   }
@@ -17,4 +19,4 @@ export async function POST(req: Request) {
     cache: "no-store",
   });
   return new Response(res.body, { status: res.status, headers: { "content-type": "application/json" } });
-}
+});
