@@ -70,7 +70,7 @@ export type ContainersQueryVariables = Exact<{
 }>;
 
 
-export type ContainersQuery = { containers: { totalCount: number, pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, code: string }> | null } | null };
+export type ContainersQuery = { containers: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, code: string }> | null } | null };
 
 export type TemperaturesQueryVariables = Exact<{
   containerId: string;
@@ -219,7 +219,6 @@ export const ViewerDocument = new TypedDocumentString(`
 export const ContainersDocument = new TypedDocumentString(`
     query Containers($after: String) {
   containers(first: 100, after: $after) {
-    totalCount
     pageInfo {
       hasNextPage
       endCursor

@@ -16,7 +16,7 @@ import * as types from './graphql';
  */
 type Documents = {
     "\n  query Viewer {\n    viewer {\n      email\n      permissions\n    }\n  }\n": typeof types.ViewerDocument,
-    "\n  query Containers($after: String) {\n    containers(first: 100, after: $after) {\n      totalCount\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n      nodes {\n        id\n        code\n      }\n    }\n  }\n": typeof types.ContainersDocument,
+    "\n  query Containers($after: String) {\n    containers(first: 100, after: $after) {\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n      nodes {\n        id\n        code\n      }\n    }\n  }\n": typeof types.ContainersDocument,
     "\n  query Temperatures($containerId: UUID!, $after: String) {\n    temperatures(containerId: $containerId, first: 100, after: $after) {\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n      nodes {\n        id\n        timestampUtc\n        celsius\n      }\n    }\n  }\n": typeof types.TemperaturesDocument,
     "\n  query Documents {\n    documents(first: 100) {\n      nodes {\n        id\n        fileName\n        contentType\n        sizeBytes\n        status\n        createdAtUtc\n        downloadUrl\n      }\n    }\n  }\n": typeof types.DocumentsDocument,
     "\n  mutation RequestDocumentUpload($input: RequestDocumentUploadInput!) {\n    requestDocumentUpload(input: $input) {\n      documentUploadPayload {\n        uploadUrl\n        document {\n          id\n        }\n      }\n      errors {\n        __typename\n        ... on Error {\n          message\n        }\n        ... on ValidationError {\n          fields {\n            field\n            messages\n          }\n        }\n      }\n    }\n  }\n": typeof types.RequestDocumentUploadDocument,
@@ -35,7 +35,7 @@ type Documents = {
 };
 const documents: Documents = {
     "\n  query Viewer {\n    viewer {\n      email\n      permissions\n    }\n  }\n": types.ViewerDocument,
-    "\n  query Containers($after: String) {\n    containers(first: 100, after: $after) {\n      totalCount\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n      nodes {\n        id\n        code\n      }\n    }\n  }\n": types.ContainersDocument,
+    "\n  query Containers($after: String) {\n    containers(first: 100, after: $after) {\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n      nodes {\n        id\n        code\n      }\n    }\n  }\n": types.ContainersDocument,
     "\n  query Temperatures($containerId: UUID!, $after: String) {\n    temperatures(containerId: $containerId, first: 100, after: $after) {\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n      nodes {\n        id\n        timestampUtc\n        celsius\n      }\n    }\n  }\n": types.TemperaturesDocument,
     "\n  query Documents {\n    documents(first: 100) {\n      nodes {\n        id\n        fileName\n        contentType\n        sizeBytes\n        status\n        createdAtUtc\n        downloadUrl\n      }\n    }\n  }\n": types.DocumentsDocument,
     "\n  mutation RequestDocumentUpload($input: RequestDocumentUploadInput!) {\n    requestDocumentUpload(input: $input) {\n      documentUploadPayload {\n        uploadUrl\n        document {\n          id\n        }\n      }\n      errors {\n        __typename\n        ... on Error {\n          message\n        }\n        ... on ValidationError {\n          fields {\n            field\n            messages\n          }\n        }\n      }\n    }\n  }\n": types.RequestDocumentUploadDocument,
@@ -60,7 +60,7 @@ export function graphql(source: "\n  query Viewer {\n    viewer {\n      email\n
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  query Containers($after: String) {\n    containers(first: 100, after: $after) {\n      totalCount\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n      nodes {\n        id\n        code\n      }\n    }\n  }\n"): typeof import('./graphql').ContainersDocument;
+export function graphql(source: "\n  query Containers($after: String) {\n    containers(first: 100, after: $after) {\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n      nodes {\n        id\n        code\n      }\n    }\n  }\n"): typeof import('./graphql').ContainersDocument;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

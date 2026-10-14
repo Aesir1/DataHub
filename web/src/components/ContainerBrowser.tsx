@@ -6,10 +6,10 @@ import { graphql } from "@/gql";
 import type { ContainersQuery, TemperaturesQuery } from "@/gql/graphql";
 import { execute } from "@/lib/graphql";
 
+// totalCount deliberately not selected: it is a COUNT(*) over 5M rows per request (load test 2026-10-14).
 const ContainersDocument = graphql(`
   query Containers($after: String) {
     containers(first: 100, after: $after) {
-      totalCount
       pageInfo {
         hasNextPage
         endCursor
