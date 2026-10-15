@@ -13,3 +13,4 @@ aspire/DataHub.AppHost/.certs/
 .env
 .idea
 SqlScripts
+graphify-out
