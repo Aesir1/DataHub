@@ -14,10 +14,11 @@ services:
   grafana:
     <<: *low-priority
     image: grafana/grafana-oss:13.0.2
-    mem_limit: 224m
+    # Grafana 13 idles around 195 MiB; 224m left no room for dashboard queries (load test 2026-10-15).
+    mem_limit: 320m
     depends_on: [prometheus, loki, tempo]
     environment:
-      GOMEMLIMIT: 192MiB
+      GOMEMLIMIT: 288MiB
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       # No default on purpose: an unset value fails the `up` rather than shipping admin/admin.
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
@@ -71,9 +72,9 @@ services:
   loki:
     <<: *low-priority
     image: grafana/loki:3.7.7
-    mem_limit: 128m
+    mem_limit: 192m
     environment:
-      GOMEMLIMIT: 112MiB
+      GOMEMLIMIT: 168MiB
     command: ["-config.file=/etc/loki/loki.yaml"]
     volumes:
       - ./docker/loki/loki.yaml:/etc/loki/loki.yaml:ro
@@ -83,9 +84,11 @@ services:
   tempo:
     <<: *low-priority
     image: grafana/tempo:3.0.3
-    mem_limit: 176m
+    # 176m OOM-crashlooped on WAL replay after an unsampled load test (exit 137 loop, 2026-10-15);
+    # headroom so ingest bursts and replay fit. Trace volume itself is capped by the 10% sampler.
+    mem_limit: 256m
     environment:
-      GOMEMLIMIT: 152MiB
+      GOMEMLIMIT: 224MiB
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     volumes:
       - ./docker/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
