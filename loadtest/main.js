@@ -47,13 +47,13 @@ const SCENARIOS = {
     executor: 'ramping-arrival-rate',
     startRate: 2,
     timeUnit: '1s',
-    preAllocatedVUs: 200,
-    maxVUs: 600,
+    preAllocatedVUs: 400,
+    maxVUs: 1200,
     stages: [
-      { duration: '1m', target: 25 },
-      { duration: '2m', target: 50 },
+      { duration: '1m', target: 50 },
       { duration: '2m', target: 100 },
       { duration: '2m', target: 200 },
+      { duration: '2m', target: 400 },
       { duration: '1m', target: 0 },
     ],
   },
@@ -195,14 +195,22 @@ function ensureLogin() {
   const action = form.attr('action');
   if (!action) {
     check(signin, { 'keycloak login page': () => false }, { flow: 'login' });
-    exec.test.abort('no Keycloak login form — check WEB_URL and that the web client is configured');
+    // 200 without the form = misconfiguration, stop the run. Timeout/5xx under load = retry.
+    if (signin.status >= 200 && signin.status < 500) {
+      exec.test.abort('no Keycloak login form — check WEB_URL and that the web client is configured');
+    }
+    return false;
   }
 
   // 3. Credentials; Keycloak redirects through /api/auth/callback/keycloak back to /app.
   const res = http.post(action, { username: EMAIL, password: PASS }, { tags: { flow: 'login' } });
   // Success = redirected all the way back to the web app (not stuck on a Keycloak page).
   authed = check(res, { 'login ok': (r) => r.status === 200 && r.url.startsWith(WEB) }, { flow: 'login' });
-  if (!authed) exec.test.abort('login failed — check LOGIN_EMAIL/LOGIN_PASSWORD');
+  // Abort only on a definitive rejection (Keycloak answered, credentials/config wrong). A timeout
+  // or 5xx under load (status 0/5xx) is transient: this VU just retries next iteration.
+  if (!authed && res.status >= 200 && res.status < 500) {
+    exec.test.abort('login rejected — check LOGIN_EMAIL/LOGIN_PASSWORD');
+  }
   return authed;
 }
 
