@@ -46,6 +46,7 @@ jobs:
           - { name: dbutils, context: ., dockerfile: src/DataHub.DbUtils/Dockerfile }
           - { name: web, context: web, dockerfile: web/Dockerfile }
           - { name: minio-init, context: docker/minio-init, dockerfile: docker/minio-init/Dockerfile }
+          - { name: caddy, context: docker/caddy, dockerfile: docker/caddy/Dockerfile }
     steps:
       - uses: actions/checkout@v5
         with:

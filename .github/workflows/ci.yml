@@ -152,6 +152,7 @@ jobs:
           - { name: webhook, dockerfile: src/DataHub.Webhook/Dockerfile, context: . }
           - { name: web, dockerfile: web/Dockerfile, context: web }
           - { name: minio-init, dockerfile: docker/minio-init/Dockerfile, context: docker/minio-init }
+          - { name: caddy, dockerfile: docker/caddy/Dockerfile, context: docker/caddy }
     steps:
       - uses: actions/checkout@v5
       - name: Image repository
