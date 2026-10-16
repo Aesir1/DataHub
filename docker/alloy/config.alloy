@@ -244,12 +244,13 @@ prometheus.scrape "probes" {
 // Host filesystem usage. cAdvisor used to answer "how full is the disk", but only as a side
 // effect of accounting every container's disk usage with a recursive du — which saturated a
 // one-core host. The unix exporter answers the same question with statfs on the mount points,
-// which costs nothing, so only the filesystem collector is enabled here.
+// which costs nothing, so only the filesystem and meminfo collectors are enabled here (meminfo is
+// one read of /proc/meminfo per scrape; it feeds the host-RAM panels in the Containers dashboard).
 // =================================================================================================
 
 prometheus.exporter.unix "host" {
   rootfs_path      = "/host/root"
-  set_collectors   = ["filesystem"]
+  set_collectors   = ["filesystem", "meminfo"]
 
   filesystem {
     // Matched against the mount point with rootfs_path already stripped off, which is why these
