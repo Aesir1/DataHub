@@ -102,6 +102,29 @@ console, published on 127.0.0.1 only, IP masquerading off). On a server:
 `ssh -L 3300:localhost:3300 -L 8081:localhost:8081 <server>`, then Grafana at http://localhost:3300 and
 the Keycloak admin console at http://localhost:8081/admin/.
 
+### Rate limiting (Caddy)
+
+Caddy is a custom build (`docker/caddy/Dockerfile`, `xcaddy` + [mholt/caddy-ratelimit](https://github.com/mholt/caddy-ratelimit))
+because stock Caddy has no rate limiting. Zones in `docker/caddy/Caddyfile`, all keyed on `{client_ip}`:
+
+| Zone | Host | Paths | Limit | Body limit |
+| --- | --- | --- | --- | --- |
+| `app` | `APP_DOMAIN` | all | 1000 req / 10s | 26MB (documents ≤ 25MB) |
+| `auth_login` | `AUTH_DOMAIN` | `/realms/datahub/protocol/openid-connect/token`, `/realms/datahub/login-actions/*` | 30 req / 1m | 1MB |
+| `hooks` | `HOOKS_DOMAIN` | `/api/webhooks/*` | 500 req / 10s | 5MB (= `ReceiveWebhook.MaxBodyBytes`) |
+
+How it behaves: a **sliding window per IP, not a ban**. Requests over the limit get `429 Too Many
+Requests` with a `Retry-After` header; as soon as enough of the window has slid past, the same IP is
+served again — nothing is remembered beyond the window, there is no block list to expire or reset.
+Counters live in Caddy's memory, so a container restart clears them.
+
+Why these numbers: Keycloak saturates first under load (~600 VU knee, load tests 2026-10-15) and a
+real user needs a handful of token requests per minute — 30/1m kills password sprays and login floods
+at the edge (verified on prod 2026-10-16: login #28 in a minute got 429, see `loadtest/RESULTS.md`
+runs 14–15). The webhook consumer drains ~100–120 msg/s in total, so 50 req/s sustained per sender is
+more than any legitimate source needs. Caveat (noted in the Caddyfile): per-IP keys treat a NAT'd
+office as one client — per-user keys would need auth at the edge.
+
 Least privilege: the api connects as a DML-only role (`docker/postgres-init`), migrations run as the owner
 in the one-shot `dbutils-migrate`, and the api and webhook each get their own MinIO account scoped to their
 buckets (`docker/minio-init`). `dbutils-seed` upserts master data and the realm's login theme and default
