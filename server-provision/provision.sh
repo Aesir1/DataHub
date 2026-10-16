@@ -377,6 +377,24 @@ if [ "$SSH_PORT" != 22 ] && ufw status | grep -qE '^22/tcp'; then
     ok "closed the old SSH port 22 in ufw"
 fi
 
+# sshd must stay usable when the app stack saturates the host (load test 2026-10-15: 2 GiB swap full,
+# load ~30, a plain `ls` over SSH hung for minutes). MemoryMin keeps sshd's pages resident under
+# memory pressure; CPUWeight (default 100) wins the scheduler fight against the container slices.
+SSHD_RES=/etc/systemd/system/ssh.service.d/90-datahub-resources.conf
+if [ -f "$SSHD_RES" ] && grep -q '^MemoryMin=128M$' "$SSHD_RES"; then
+    skip "ssh.service resource guarantees in place"
+else
+    mkdir -p /etc/systemd/system/ssh.service.d
+    cat > "$SSHD_RES" <<CONF
+# $MARK
+[Service]
+MemoryMin=128M
+CPUWeight=1000
+CONF
+    systemctl daemon-reload
+    ok "ssh.service pinned: MemoryMin=128M CPUWeight=1000"
+fi
+
 # ---------------------------------------------------------------------------------------------
 step "fail2ban"
 # ---------------------------------------------------------------------------------------------
