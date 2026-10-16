@@ -30,6 +30,8 @@
     <PackageVersion Include="Aspire.Hosting.Azure.Functions" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Testing" Version="$(AspireVersion)" />
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Minio" Version="13.5.0" />
+    <!-- Transitive via Aspire.Hosting -> StreamJsonRpc; 2.5.302 has GHSA-qhrr-8q5h-9q3h. Drop when Aspire ships a fixed StreamJsonRpc. -->
+    <PackageVersion Include="MessagePack" Version="2.5.303" />
     <PackageVersion Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.RabbitMQ.Client" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Keycloak.Authentication" Version="13.5.4-preview.1.26464.4" />
