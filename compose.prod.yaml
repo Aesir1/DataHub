@@ -347,12 +347,14 @@ services:
 
   minio:
     # minio/minio is no longer published on Docker Hub; Chainguard's build is free and multi-arch.
-    # Digest-pinned (Chainguard's free tier has no version tags, and a floating `latest` means every
-    # deploy may silently upgrade MinIO and trigger a full namespace rescan — ~30 min at 200% CPU on
-    # 2026-10-16). Upgrading = replace the digest deliberately, when a rescan is acceptable.
-    # This is RELEASE.2026-09-22T19-25-18Z.
+    # Digest-pinned: Chainguard's free tier has no version tags, and a floating `latest` re-resolves
+    # on every deploy (Chainguard rebuilds every few days), recreating the container for nothing.
+    # Upgrading = replace the digest deliberately. This is RELEASE.2026-09-22T19-25-18Z.
     image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
     restart: unless-stopped
+    # The scanner's working set must fit here or the page cache thrashes: at 160m with 53K objects
+    # (419MB, small objects inline in xl.meta) the scanner re-read the whole volume every cycle —
+    # 438K workingset refaults, ~135% CPU sustained (2026-10-16). Keep object count small or raise this.
     mem_limit: 160m
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
@@ -361,6 +363,10 @@ services:
       # /minio/metrics/v3 without a token; only the internal observability network reaches it.
       MINIO_PROMETHEUS_AUTH_TYPE: public
       MINIO_UPDATE: "off"
+      # The built-in data scanner (usage stats + healing) recrawls all objects back to back:
+      # ~25 min at 100-175% CPU per cycle on this host (2026-10-16). Single node, no replication,
+      # no lifecycle rules — nothing needs fast scans; slowest = long sleeps between objects.
+      MINIO_SCANNER_SPEED: slowest
     volumes:
       - miniodata:/data
     # Not on proxy: no public route. Only the api, webhook and one-shot jobs (backend) reach it.
