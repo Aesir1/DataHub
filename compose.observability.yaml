@@ -147,7 +147,7 @@ services:
 
   # Idempotent, runs on every `up`: read-only pg_monitor role + pg_stat_statements in the app database.
   pg-monitor-init:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine
     depends_on:
       postgres:
         condition: service_healthy

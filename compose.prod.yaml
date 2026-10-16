@@ -77,7 +77,7 @@ services:
   # Local test only (CADDY_TLS=internal): copies Caddy's public root certificate where the non-root web
   # process can read it; Caddy's data directory is root-only. With a public CA there is nothing to copy.
   caddy-ca:
-    image: caddy:2-alpine
+    image: caddy:2.11.7-alpine
     depends_on:
       caddy:
         condition: service_healthy
@@ -237,7 +237,7 @@ services:
   # Identity
   # ---------------------------------------------------------------------------------------------
   keycloak:
-    image: quay.io/keycloak/keycloak:26.6
+    image: quay.io/keycloak/keycloak:26.6.4
     restart: unless-stopped
     # Keycloak is PID 1 in its container and never reaps finished healthcheck children; without an
     # init process they pile up as zombies (82 after the 2026-10-15 stress test).
@@ -288,7 +288,7 @@ services:
   # Data
   # ---------------------------------------------------------------------------------------------
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine
     restart: unless-stopped
     mem_limit: 448m
     # pg_stat_statements must be preloaded; postgres-exporter reads query rate and slow queries from it.
@@ -326,7 +326,7 @@ services:
     networks: [backend, observability, tunnel]
 
   rabbitmq:
-    image: rabbitmq:4.3-management
+    image: rabbitmq:4.3.6-management
     restart: unless-stopped
     mem_limit: 288m
     environment:
@@ -347,7 +347,11 @@ services:
 
   minio:
     # minio/minio is no longer published on Docker Hub; Chainguard's build is free and multi-arch.
-    image: cgr.dev/chainguard/minio:latest
+    # Digest-pinned (Chainguard's free tier has no version tags, and a floating `latest` means every
+    # deploy may silently upgrade MinIO and trigger a full namespace rescan — ~30 min at 200% CPU on
+    # 2026-10-16). Upgrading = replace the digest deliberately, when a rescan is acceptable.
+    # This is RELEASE.2026-09-22T19-25-18Z.
+    image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
     restart: unless-stopped
     mem_limit: 160m
     command: ["server", "/data", "--console-address", ":9001"]
