@@ -10,4 +10,6 @@ paths = [
   '''aspire/DataHub\.AppHost/keycloak/realms/.*\.json''',
   '''tests/.*''',
   '''web/src/gql/.*''',
+  # Graphify cache: path-to-hash maps; hashes false-positive as generic-api-key.
+  '''graphify-out/.*''',
 ]
