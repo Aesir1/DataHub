@@ -13,6 +13,8 @@ x-limits: &low-priority
 services:
   grafana:
     <<: *low-priority
+    # Grafana is PID 1 and never reaps healthcheck children; init reaps the zombies.
+    init: true
     image: grafana/grafana-oss:13.0.2
     # Grafana 13 idles around 195 MiB; 224m left no room for dashboard queries (load test 2026-10-15).
     mem_limit: 320m

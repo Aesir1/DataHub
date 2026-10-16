@@ -3,6 +3,7 @@
 # host and ports 80/443 must be reachable) and `internal` for local testing (Caddy's own CA).
 {
 	admin off
+	order rate_limit before basic_auth
 }
 
 (common) {
@@ -26,6 +27,14 @@
 	request_body {
 		max_size 26MB
 	}
+	# ponytail: per-IP keys rate-limit a whole NAT'd office as one client; per-user keys need auth at the edge.
+	rate_limit {
+		zone app {
+			key {client_ip}
+			events 1000
+			window 10s
+		}
+	}
 	reverse_proxy web:3000
 }
 
@@ -34,6 +43,21 @@
 # (KEYCLOAK_ADMIN_BIND in .env). The services talk to Keycloak internally, not through Caddy.
 {$AUTH_DOMAIN} {
 	import common
+	request_body {
+		max_size 1MB
+	}
+	# Keycloak saturates first under load (~600 VU knee, load tests 2026-10-15). A real user needs a
+	# handful of these per minute; this kills password sprays and login floods before they reach it.
+	rate_limit {
+		zone auth_login {
+			match {
+				path /realms/datahub/protocol/openid-connect/token /realms/datahub/login-actions/*
+			}
+			key {client_ip}
+			events 30
+			window 1m
+		}
+	}
 	# The tunnelled admin console loads its third-party-cookie check and session iframe from the
 	# master realm's PUBLIC frontend URL; these are static helper pages without auth data, so they
 	# are exempt from the master-realm block below (else the console dies with "Timeout when
@@ -54,6 +78,18 @@
 # Inbound webhooks (Azure Functions). Only the webhook route and the health probe exist publicly.
 {$HOOKS_DOMAIN} {
 	import common
+	# The webhook reads at most 5 MiB (ReceiveWebhook.MaxBodyBytes); reject bigger bodies at the edge.
+	request_body {
+		max_size 5MB
+	}
+	# The consumer drains ~100-120 msg/s in total; no single sender needs more than 50 req/s sustained.
+	rate_limit {
+		zone hooks {
+			key {client_ip}
+			events 500
+			window 10s
+		}
+	}
 	@allowed path /api/webhooks/* /api/health
 	handle @allowed {
 		reverse_proxy webhook:80

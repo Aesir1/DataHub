@@ -15,7 +15,7 @@ public sealed class ReceiveWebhook(
     TimeProvider time,
     ILogger<ReceiveWebhook> logger)
 {
-    public const int MaxBodyBytes = 1_048_576;
+    public const int MaxBodyBytes = 5_242_880;
     public const string IdHeader = "X-Webhook-Id";
     public const string EventHeader = "X-Webhook-Event";
 
