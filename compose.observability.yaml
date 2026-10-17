@@ -17,10 +17,11 @@ services:
     init: true
     image: grafana/grafana-oss:13.0.2
     # Grafana 13 idles around 195 MiB; 224m left no room for dashboard queries (load test 2026-10-15).
-    mem_limit: 320m
+    # 288m trimmed from 320m on 2026-10-17 to fund minio's page cache — restore first if dashboards OOM.
+    mem_limit: 288m
     depends_on: [prometheus, loki, tempo]
     environment:
-      GOMEMLIMIT: 288MiB
+      GOMEMLIMIT: 256MiB
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       # No default on purpose: an unset value fails the `up` rather than shipping admin/admin.
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
@@ -55,9 +56,9 @@ services:
   prometheus:
     <<: *low-priority
     image: prom/prometheus:v3.14.0
-    mem_limit: 192m
+    mem_limit: 160m
     environment:
-      GOMEMLIMIT: 168MiB
+      GOMEMLIMIT: 140MiB
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -74,9 +75,9 @@ services:
   loki:
     <<: *low-priority
     image: grafana/loki:3.7.7
-    mem_limit: 192m
+    mem_limit: 160m
     environment:
-      GOMEMLIMIT: 168MiB
+      GOMEMLIMIT: 140MiB
     command: ["-config.file=/etc/loki/loki.yaml"]
     volumes:
       - ./docker/loki/loki.yaml:/etc/loki/loki.yaml:ro
@@ -101,9 +102,9 @@ services:
   alloy:
     <<: *low-priority
     image: grafana/alloy:v1.19.2
-    mem_limit: 224m
+    mem_limit: 192m
     environment:
-      GOMEMLIMIT: 192MiB
+      GOMEMLIMIT: 168MiB
       PROBE_API: http://api:8080/health
       PROBE_WEBHOOK: http://webhook:80/api/health
       PROBE_WEB: http://web:3000/
