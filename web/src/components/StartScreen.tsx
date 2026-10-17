@@ -37,7 +37,7 @@ export function StartScreen({ branding, action }: { branding: Branding; action: 
               type="submit"
               className="w-full rounded-md bg-primary px-4 py-2 font-medium text-on-primary hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             >
-              Sign in or register
+              Sign in or register!
             </button>
           </form>
         </div>
