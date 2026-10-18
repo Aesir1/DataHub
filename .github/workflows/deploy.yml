@@ -189,3 +189,28 @@ jobs:
             ssh server "bash datahub/current/server-provision/release.sh status" 2>&1 | head -40 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Telegram notification
+        # Plain text, no parse_mode: commit subjects may contain Markdown-breaking characters.
+        # A notification failure never fails (or retries) the deploy — hence the final || true.
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          JOB_STATUS: ${{ job.status }}
+          ACTIVATE: ${{ steps.activate.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          commit=$(git log -1 --format='%h %s — %an' "$SHA")
+          case "$JOB_STATUS" in
+            success) icon="✅" verdict="deployed" ;;
+            *)       icon="❌" verdict="FAILED" ;;
+          esac
+          [ "$SMOKE" = "failure" ] && verdict="FAILED (smoke test) — rolled back"
+          [ "$ACTIVATE" = "failure" ] && verdict="FAILED (activate) — previous release restored"
+          msg=$(printf '%s DataHub %s\ncommit: %s\nactivate: %s · smoke: %s\n%s' \
+            "$icon" "$verdict" "$commit" "$ACTIVATE" "$SMOKE" "$RUN_URL")
+          curl -fsS -m 20 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode chat_id="$TELEGRAM_CHAT_ID" \
+            --data-urlencode text="$msg" >/dev/null || true
