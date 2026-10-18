@@ -14,3 +14,4 @@ aspire/DataHub.AppHost/.certs/
 .idea
 SqlScripts
 graphify-out
+/server-provision/backup-secrets.txt

@@ -226,6 +226,12 @@ bash server-provision/tests/test-containers.sh
 | Rotate the deploy key | Add the new public key with `restrict ` in front to `~deploy/.ssh/authorized_keys`, update `SSH_KEY`, remove the old line |
 | Server re-created | Provision again and update `SSH_KNOWN_HOSTS`; restore the `pgdata` and `miniodata` volumes from backup |
 
-Not covered here, plan them separately: **backups** of the `pgdata` and `miniodata` volumes (off the
-server), provider-level firewall/DDoS protection (a cloud firewall allowing only 22/80/443 adds a second
-layer in front of ufw), and log shipping off the host.
+**Backups**: `backup.sh` (run once as root) installs a nightly systemd timer that dumps Postgres
+(`pg_dumpall`), snapshots the `miniodata` volume and the stack `.env` to Google Drive with restic
+over rclone (client-side encrypted), keeps 7 daily / 4 weekly / 12 monthly snapshots (GFS), and
+reports success/failure to a Telegram bot. The header of `backup.sh` lists the one-time
+prerequisites (BotFather token, `rclone authorize "drive"`). Store the printed `RESTIC_PASSWORD`
+off the server, and run a restore drill after install: `restic restore latest --target /tmp/restore-drill`.
+
+Not covered here, plan them separately: provider-level firewall/DDoS protection (a cloud firewall
+allowing only 22/80/443 adds a second layer in front of ufw), and log shipping off the host.
