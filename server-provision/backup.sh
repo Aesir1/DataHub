@@ -131,10 +131,15 @@ install -m 600 "$BASE/.env" "$STAGE/stack.env"
 #    atomically, so file-level copy is consistent. restic dedups, only changed objects upload.
 restic backup --quiet "$STAGE" "$MINIO_DATA"
 
-# 4. GFS retention: 7 daily, 4 weekly, 12 monthly.
+# 4. GFS retention: 7 daily, 4 weekly, 12 monthly. forget --prune needs an exclusive lock, so one
+#    killed run's leftover lock blocked every prune after it (observed: a month of failures).
+#    Plain `unlock` removes only stale locks (dead PID on this host / not refreshed), never a live one.
+restic unlock --quiet
 restic forget --quiet --prune --keep-daily 7 --keep-weekly 4 --keep-monthly 12
 
-stats=$(restic stats --mode raw-data latest 2>/dev/null | grep 'Total Size' || true)
+# Size figure is decoration: never let it hold the run (observed hanging for hours on the
+# rclone/Drive backend). 60s or we send the message without it.
+stats=$(timeout 60 restic stats --mode raw-data latest 2>/dev/null | grep 'Total Size' || true)
 notify "✅ DataHub backup OK on $(hostname) in $(( $(date +%s) - start ))s. ${stats}"
 SCRIPT
 chmod 700 /usr/local/bin/datahub-backup
@@ -158,6 +163,11 @@ Description=DataHub GFS backup to Google Drive (restic)
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/datahub-backup
+# systemd gives the unit no $HOME: rclone needs it for its config, and restic without a cache
+# re-reads all repo metadata from Google Drive on every command (observed: hours-long stats).
+Environment=HOME=/root
+Environment=RESTIC_CACHE_DIR=/var/cache/restic
+CacheDirectory=restic
 # Keep restic off the app stack's throat on an overcommitted host.
 Nice=15
 IOSchedulingClass=idle
